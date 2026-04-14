@@ -1,0 +1,56 @@
+running egg_info
+creating ../../build/autonomous_navigation/autonomous_navigation.egg-info
+writing ../../build/autonomous_navigation/autonomous_navigation.egg-info/PKG-INFO
+writing dependency_links to ../../build/autonomous_navigation/autonomous_navigation.egg-info/dependency_links.txt
+writing entry points to ../../build/autonomous_navigation/autonomous_navigation.egg-info/entry_points.txt
+writing requirements to ../../build/autonomous_navigation/autonomous_navigation.egg-info/requires.txt
+writing top-level names to ../../build/autonomous_navigation/autonomous_navigation.egg-info/top_level.txt
+writing manifest file '../../build/autonomous_navigation/autonomous_navigation.egg-info/SOURCES.txt'
+reading manifest file '../../build/autonomous_navigation/autonomous_navigation.egg-info/SOURCES.txt'
+writing manifest file '../../build/autonomous_navigation/autonomous_navigation.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /home/fedir/ROB/build/autonomous_navigation/build
+creating /home/fedir/ROB/build/autonomous_navigation/build/lib
+creating /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation
+copying ./route_manager.py -> /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation
+copying ./__init__.py -> /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation
+copying ./main_node.py -> /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation
+copying ./telemetry.py -> /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation
+copying ./config.py -> /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation
+copying ./local_planner.py -> /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation
+copying ./global_planner.py -> /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation
+copying ./pose_estimator.py -> /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation
+copying ./map_manager.py -> /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation
+running install
+running install_lib
+creating /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation
+copying /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation/route_manager.py -> /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation
+copying /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation/__init__.py -> /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation
+copying /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation/main_node.py -> /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation
+copying /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation/telemetry.py -> /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation
+copying /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation/config.py -> /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation
+copying /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation/local_planner.py -> /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation
+copying /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation/global_planner.py -> /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation
+copying /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation/pose_estimator.py -> /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation
+copying /home/fedir/ROB/build/autonomous_navigation/build/lib/autonomous_navigation/map_manager.py -> /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation
+byte-compiling /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation/route_manager.py to route_manager.cpython-312.pyc
+byte-compiling /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation/__init__.py to __init__.cpython-312.pyc
+byte-compiling /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation/main_node.py to main_node.cpython-312.pyc
+byte-compiling /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation/telemetry.py to telemetry.cpython-312.pyc
+byte-compiling /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation/config.py to config.cpython-312.pyc
+byte-compiling /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation/local_planner.py to local_planner.cpython-312.pyc
+byte-compiling /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation/global_planner.py to global_planner.cpython-312.pyc
+byte-compiling /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation/pose_estimator.py to pose_estimator.cpython-312.pyc
+byte-compiling /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation/map_manager.py to map_manager.cpython-312.pyc
+running install_data
+creating /home/fedir/ROB/install/autonomous_navigation/share/ament_index
+creating /home/fedir/ROB/install/autonomous_navigation/share/ament_index/resource_index
+creating /home/fedir/ROB/install/autonomous_navigation/share/ament_index/resource_index/packages
+copying resource/autonomous_navigation -> /home/fedir/ROB/install/autonomous_navigation/share/ament_index/resource_index/packages
+copying package.xml -> /home/fedir/ROB/install/autonomous_navigation/share/autonomous_navigation
+running install_egg_info
+Copying ../../build/autonomous_navigation/autonomous_navigation.egg-info to /home/fedir/ROB/install/autonomous_navigation/lib/python3.12/site-packages/autonomous_navigation-0.0.1-py3.12.egg-info
+running install_scripts
+Installing autonomous_navigation script to /home/fedir/ROB/install/autonomous_navigation/lib/autonomous_navigation
+writing list of installed files to '/home/fedir/ROB/build/autonomous_navigation/install.log'
