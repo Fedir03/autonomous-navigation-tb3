@@ -4,7 +4,7 @@ import time
 
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, TwistStamped
-from nav_msgs.msg import OccupancyGrid, Odometry
+from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
@@ -43,6 +43,7 @@ class PointAToBNode(Node):
         self.publisher = self.create_publisher(TwistStamped, "/cmd_vel", 10)
         self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped, "/initialpose", 10)
         self.debug_marker_pub = self.create_publisher(MarkerArray, "/nav_debug_markers", 10)
+        self.path_pub = self.create_publisher(Path, "/nav_planned_path", 10)
 
         self.create_subscription(Odometry, "/odom", self.pose_estimator.odom_callback, qos_best_effort)
         self.create_subscription(LaserScan, "/scan", self.local_planner.scan_callback, qos_best_effort)
@@ -249,6 +250,11 @@ class PointAToBNode(Node):
         if now - self.last_marker_publish_time >= self.config.marker_publish_period:
             self.telemetry.publish_debug_markers(
                 self.debug_marker_pub,
+                self.pose_estimator,
+                self.route_manager,
+            )
+            self.telemetry.publish_planned_path(
+                self.path_pub,
                 self.pose_estimator,
                 self.route_manager,
             )

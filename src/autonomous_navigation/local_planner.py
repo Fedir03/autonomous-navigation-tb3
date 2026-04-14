@@ -16,7 +16,7 @@ class LocalPlanner:
         self.min_right_dist = float("inf")
 
         # FSM state
-        self.nav_state = "FOLLOW_GOAL"  # FOLLOW_GOAL | AVOID_OBSTACLE | WALL_FOLLOW | REJOIN_PATH
+        self.nav_state = "FOLLOW_GOAL"  # FOLLOW_GOAL | AVOID_OBSTACLE | WALL_FOLLOW | REJOIN_PATH | BACKUP
         self.wall_follow_side = "right"
         self.wall_follow_hit_distance = float("inf")
         self.bug2_line_start = None
@@ -127,6 +127,19 @@ class LocalPlanner:
 
         target = route_manager.target
 
+        # Hard-priority emergency reverse when something is too close in front.
+        if self.nav_state != "BACKUP" and self.min_front_dist < self.config.backup_min_front_distance:
+            self.nav_state = "BACKUP"
+
+        if self.nav_state == "BACKUP":
+            if self.min_front_dist < self.config.backup_min_front_distance:
+                move.twist.linear.x = -abs(self.config.backup_speed)
+                move.twist.angular.z = 0.0
+                return move
+
+            # Recovered clearance: continue with normal obstacle handling.
+            self.nav_state = "AVOID_OBSTACLE"
+
         # If there is no active path, retry pending segments and keep local escape active if needed.
         if (not route_manager.is_moving) or (not route_manager.path):
             if route_manager.pending_segment_target is not None and now >= route_manager.next_segment_retry_time:
@@ -142,7 +155,7 @@ class LocalPlanner:
                         now,
                     )
 
-            if self.nav_state in ["WALL_FOLLOW", "AVOID_OBSTACLE", "REJOIN_PATH"] and route_manager.target is not None:
+            if self.nav_state in ["WALL_FOLLOW", "AVOID_OBSTACLE", "REJOIN_PATH", "BACKUP"] and route_manager.target is not None:
                 route_manager.is_moving = True
             else:
                 return move

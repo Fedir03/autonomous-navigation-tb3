@@ -46,6 +46,10 @@ class NavigationConfig:
     follow_obstacle_hit_reset_s: float = 1.2
     follow_obstacle_hit_threshold: int = 3
 
+    # Emergency reverse: if an obstacle is closer than this, back up until clear.
+    backup_min_front_distance: float = 0.20
+    backup_speed: float = 0.08
+
     status_print_period: float = 1.0
     marker_publish_period: float = 0.5
 

@@ -1,6 +1,7 @@
 import math
 
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, PoseStamped
+from nav_msgs.msg import Path
 from visualization_msgs.msg import Marker, MarkerArray
 
 from .config import quaternion_from_yaw
@@ -280,3 +281,25 @@ class Telemetry:
             markers.markers.append(m_path)
 
         marker_pub.publish(markers)
+
+    def publish_planned_path(self, path_pub, pose_estimator, route_manager):
+        msg = Path()
+        msg.header.frame_id = "map"
+        msg.header.stamp = self.node.get_clock().now().to_msg()
+
+        start = PoseStamped()
+        start.header = msg.header
+        start.pose.position.x = float(pose_estimator.current_x)
+        start.pose.position.y = float(pose_estimator.current_y)
+        start.pose.orientation.w = 1.0
+        msg.poses.append(start)
+
+        for wp in route_manager.path:
+            pose = PoseStamped()
+            pose.header = msg.header
+            pose.pose.position.x = float(wp[0])
+            pose.pose.position.y = float(wp[1])
+            pose.pose.orientation.w = 1.0
+            msg.poses.append(pose)
+
+        path_pub.publish(msg)
