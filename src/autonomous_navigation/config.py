@@ -86,11 +86,59 @@ class CoordinateAdapter:
     def __init__(self, swap_xy: bool = False):
         self.swap_xy = swap_xy
 
-    def to_internal_xy(self, x: float, y: float) -> Tuple[float, float]:
+        # Transform from external/user frame -> SLAM map frame.
+        self.frame_aligned = False
+        self.align_cos = 1.0
+        self.align_sin = 0.0
+        self.map_origin_x = 0.0
+        self.map_origin_y = 0.0
+        self.ext_origin_x = 0.0
+        self.ext_origin_y = 0.0
+
+    def set_frame_alignment(
+        self,
+        ext_x: float,
+        ext_y: float,
+        ext_yaw: float,
+        map_x: float,
+        map_y: float,
+        map_yaw: float,
+    ):
+        # Rotate/translate external coordinates so the provided initial pose matches current SLAM pose.
+        d_yaw = normalize_angle(map_yaw - ext_yaw)
+        self.align_cos = math.cos(d_yaw)
+        self.align_sin = math.sin(d_yaw)
+        self.map_origin_x = map_x
+        self.map_origin_y = map_y
+        sx, sy = self._apply_swap(ext_x, ext_y)
+        self.ext_origin_x = sx
+        self.ext_origin_y = sy
+        self.frame_aligned = True
+
+    def _apply_swap(self, x: float, y: float) -> Tuple[float, float]:
         return (y, x) if self.swap_xy else (x, y)
 
+    def to_internal_xy(self, x: float, y: float) -> Tuple[float, float]:
+        sx, sy = self._apply_swap(x, y)
+        if not self.frame_aligned:
+            return (sx, sy)
+
+        dx = sx - self.ext_origin_x
+        dy = sy - self.ext_origin_y
+        mx = self.map_origin_x + (self.align_cos * dx - self.align_sin * dy)
+        my = self.map_origin_y + (self.align_sin * dx + self.align_cos * dy)
+        return (mx, my)
+
     def to_external_xy(self, x: float, y: float) -> Tuple[float, float]:
-        return (y, x) if self.swap_xy else (x, y)
+        if self.frame_aligned:
+            dx = x - self.map_origin_x
+            dy = y - self.map_origin_y
+            sx = self.ext_origin_x + (self.align_cos * dx + self.align_sin * dy)
+            sy = self.ext_origin_y + (-self.align_sin * dx + self.align_cos * dy)
+        else:
+            sx, sy = x, y
+
+        return self._apply_swap(sx, sy)
 
     def format_external_xy(self, xy: Optional[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
         if xy is None:

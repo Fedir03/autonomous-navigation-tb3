@@ -72,8 +72,27 @@ class PointAToBNode(Node):
             init_y = float(input("Enter Initial Y: "))
             init_yaw_deg = float(input("Enter Initial Yaw (degrees): "))
 
-            init_x_internal, init_y_internal = self.coords.to_internal_xy(init_x, init_y)
             yaw_rad = math.radians(init_yaw_deg)
+
+            # Align user/teacher map coordinates to the live SLAM map frame.
+            if self.pose_estimator.get_robot_pose():
+                self.coords.set_frame_alignment(
+                    init_x,
+                    init_y,
+                    yaw_rad,
+                    self.pose_estimator.current_x,
+                    self.pose_estimator.current_y,
+                    self.pose_estimator.current_yaw,
+                )
+                self.get_logger().info(
+                    "Coordinate frames aligned: external initial pose mapped to current SLAM pose."
+                )
+            else:
+                self.get_logger().warn(
+                    "TF pose unavailable during initialization. Using unaligned external coordinates as fallback."
+                )
+
+            init_x_internal, init_y_internal = self.coords.to_internal_xy(init_x, init_y)
 
             init_msg = PoseWithCovarianceStamped()
             init_msg.header.stamp = self.get_clock().now().to_msg()

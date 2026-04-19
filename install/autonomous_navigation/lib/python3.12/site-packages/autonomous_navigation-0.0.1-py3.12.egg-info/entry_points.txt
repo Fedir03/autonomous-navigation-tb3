@@ -1,2 +1,0 @@
-[console_scripts]
-autonomous_navigation = autonomous_navigation.main_node:main

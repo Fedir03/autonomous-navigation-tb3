@@ -72,9 +72,6 @@ class PoseEstimator:
         return True
 
     def get_robot_pose(self) -> bool:
-        if self.update_pose_from_manual_anchor():
-            return True
-
         try:
             t = self.tf_buffer.lookup_transform("map", "base_link", rclpy.time.Time())
             self.current_x = t.transform.translation.x
@@ -84,4 +81,4 @@ class PoseEstimator:
             self.pose_source = "tf"
             return True
         except Exception:
-            return False
+            return self.update_pose_from_manual_anchor()
