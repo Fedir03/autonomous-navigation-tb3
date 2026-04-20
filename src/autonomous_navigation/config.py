@@ -4,16 +4,17 @@ from typing import Dict, Optional, Tuple
 
 # Key reference points (external/user convention, do NOT swap)
 KEY_POINTS: Dict[str, Tuple[float, float]] = {
-    "A": (2.52, 1.35),
-    "B": (3.72, 2.55),
-    "C": (1.32, 0.95),
-    "D": (3.32, 0.95),
-    "DOOR": (5.92, 8.12),
-    "BASE": (5.00, 11.69),
-    "O": (5.10, 12.61),
-    "P": (0.30, 11.01),
-    "Q": (1.90, 12.21),
-    "R": (7.12, 12.61),
+    "A": (4.280, 1.735),
+    "B": (5.280, 1.735),
+    "C": (4.880, 2.535),
+    "D": (5.080, 5.740),
+    "E": (5.880, 8.145),
+    "DOOR": (6.280, 11.685),
+    "Q": (9.115, 14.590),
+    "R": (7.310, 16.190),
+    "S": (3.675, 14.190),
+    "T": (1.275, 14.990),
+    "BASE": (3.475, 15.390),
 }
 
 
@@ -58,7 +59,7 @@ class NavigationConfig:
 
     # Door-first routing rule for upper room objectives.
     door_required_y_threshold: float = 8.5
-    door_forced_targets: Tuple[str, ...] = ("O", "P", "Q", "R")
+    door_forced_targets: Tuple[str, ...] = ("Q", "R", "S", "T", "BASE")
     door_progress_min_delta_y: float = 0.2
 
     # Lidar-guided maneuver after crossing DOOR:
