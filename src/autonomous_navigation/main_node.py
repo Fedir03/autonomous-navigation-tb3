@@ -1,6 +1,10 @@
 import math
+import select
+import sys
+import termios
 import threading
 import time
+import tty
 
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, TwistStamped
@@ -39,6 +43,11 @@ class PointAToBNode(Node):
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             depth=1,
         )
+        qos_map_fallback = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            depth=1,
+        )
 
         self.publisher = self.create_publisher(TwistStamped, "/cmd_vel", 10)
         self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped, "/initialpose", 10)
@@ -49,12 +58,20 @@ class PointAToBNode(Node):
         self.create_subscription(LaserScan, "/scan", self.local_planner.scan_callback, qos_best_effort)
         self.create_subscription(OccupancyGrid, "/map", self.map_callback, qos_map)
         self.create_subscription(OccupancyGrid, "/base_map", self.base_map_callback, qos_map)
+        # Fallback QoS to receive map topics when publisher QoS differs.
+        self.create_subscription(OccupancyGrid, "/map", self.map_callback, qos_map_fallback)
+        self.create_subscription(OccupancyGrid, "/base_map", self.base_map_callback, qos_map_fallback)
 
-        self.last_status_print_time = 0.0
+        self.awaiting_user_input = False
+        self.status_print_requests = 0
+        self.status_lock = threading.Lock()
+        self.pending_frame_alignment = None
+        self.frame_alignment_done = False
         self.last_marker_publish_time = 0.0
 
         self.timer = self.create_timer(0.1, self.control_loop)
         threading.Thread(target=self.input_thread, daemon=True).start()
+        threading.Thread(target=self.spacebar_status_thread, daemon=True).start()
 
     def map_callback(self, msg: OccupancyGrid):
         self.map_manager.map_callback(msg, self.get_logger())
@@ -62,34 +79,103 @@ class PointAToBNode(Node):
     def base_map_callback(self, msg: OccupancyGrid):
         self.map_manager.base_map_callback(msg, self.get_logger())
 
+    def try_align_frames(self):
+        if self.frame_alignment_done or self.pending_frame_alignment is None:
+            return False
+
+        if not self.pose_estimator.get_robot_pose():
+            return False
+
+        init_x, init_y, yaw_rad = self.pending_frame_alignment
+        self.coords.set_frame_alignment(
+            init_x,
+            init_y,
+            yaw_rad,
+            self.pose_estimator.current_x,
+            self.pose_estimator.current_y,
+            self.pose_estimator.current_yaw,
+        )
+        self.frame_alignment_done = True
+        self.get_logger().info("Coordinate frames aligned using TF map pose.")
+        return True
+
+    def read_user_line(self, prompt: str) -> str:
+        self.awaiting_user_input = True
+        try:
+            return input(prompt)
+        finally:
+            self.awaiting_user_input = False
+
+    def queue_status_print(self):
+        with self.status_lock:
+            self.status_print_requests += 1
+
+    def consume_status_print_requests(self) -> int:
+        with self.status_lock:
+            requests = self.status_print_requests
+            self.status_print_requests = 0
+        return requests
+
+    def spacebar_status_thread(self):
+        if not sys.stdin.isatty():
+            self.get_logger().warn("Spacebar status hotkey disabled: stdin is not a TTY.")
+            return
+
+        fd = sys.stdin.fileno()
+        original_tty = None
+        raw_mode_enabled = False
+        hotkey_info_printed = False
+
+        try:
+            while rclpy.ok():
+                hotkey_enabled = self.route_manager.is_moving and (not self.awaiting_user_input)
+
+                if hotkey_enabled and not raw_mode_enabled:
+                    original_tty = termios.tcgetattr(fd)
+                    tty.setcbreak(fd)
+                    raw_mode_enabled = True
+                    if not hotkey_info_printed:
+                        print("[Hotkey] Press SPACE to print robot status.")
+                        hotkey_info_printed = True
+                elif (not hotkey_enabled) and raw_mode_enabled:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, original_tty)
+                    raw_mode_enabled = False
+
+                if not hotkey_enabled:
+                    time.sleep(0.05)
+                    continue
+
+                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if not ready:
+                    continue
+
+                ch = sys.stdin.read(1)
+                if ch == " ":
+                    self.queue_status_print()
+        except Exception as exc:
+            self.get_logger().warn(f"Spacebar status hotkey stopped: {exc}")
+        finally:
+            if raw_mode_enabled and original_tty is not None:
+                termios.tcsetattr(fd, termios.TCSADRAIN, original_tty)
+
     def input_thread(self):
         time.sleep(2)
         print("Available Points:", ", ".join(KEY_POINTS.keys()))
+        print("Press SPACE while the robot is moving to print navigation status.")
 
         print("\n--- Set Initial Robot Pose ---")
         try:
-            init_x = float(input("Enter Initial X: "))
-            init_y = float(input("Enter Initial Y: "))
-            init_yaw_deg = float(input("Enter Initial Yaw (degrees): "))
+            init_x = float(self.read_user_line("Enter Initial X: "))
+            init_y = float(self.read_user_line("Enter Initial Y: "))
+            init_yaw_deg = float(self.read_user_line("Enter Initial Yaw (degrees): "))
 
             yaw_rad = math.radians(init_yaw_deg)
+            self.pending_frame_alignment = (init_x, init_y, yaw_rad)
 
-            # Align user/teacher map coordinates to the live SLAM map frame.
-            if self.pose_estimator.get_robot_pose():
-                self.coords.set_frame_alignment(
-                    init_x,
-                    init_y,
-                    yaw_rad,
-                    self.pose_estimator.current_x,
-                    self.pose_estimator.current_y,
-                    self.pose_estimator.current_yaw,
-                )
-                self.get_logger().info(
-                    "Coordinate frames aligned: external initial pose mapped to current SLAM pose."
-                )
-            else:
+            # Try alignment now; if TF is not available yet, retry automatically in control loop.
+            if not self.try_align_frames():
                 self.get_logger().warn(
-                    "TF pose unavailable during initialization. Using unaligned external coordinates as fallback."
+                    "TF pose unavailable during initialization. Frame alignment will retry automatically."
                 )
 
             init_x_internal, init_y_internal = self.coords.to_internal_xy(init_x, init_y)
@@ -177,13 +263,12 @@ class PointAToBNode(Node):
             return
 
         while rclpy.ok():
-            if not (self.map_manager.map_received or self.map_manager.base_map_received):
-                print("Waiting for /map or /base_map...")
-                time.sleep(1)
+            if self.route_manager.is_moving:
+                time.sleep(0.1)
                 continue
 
             try:
-                user_in = input("\nEnter Final Target (Name or X,Y): ").strip().upper()
+                user_in = self.read_user_line("\nEnter Final Target (Name or X,Y): ").strip().upper()
                 if user_in in ["STATUS", "S", "POS", "POSE"]:
                     self.pose_estimator.get_robot_pose()
                     self.telemetry.print_navigation_status(
@@ -253,18 +338,22 @@ class PointAToBNode(Node):
                 self.route_manager.is_moving = False
 
     def control_loop(self):
+        # Keep trying frame alignment until TF map pose becomes available.
+        if not self.frame_alignment_done and self.pending_frame_alignment is not None:
+            self.try_align_frames()
+
         if not self.pose_estimator.get_robot_pose() and not self.pose_estimator.initial_pose_received:
             return
 
         now = time.time()
-        if now - self.last_status_print_time >= self.config.status_print_period:
+        pending_status_prints = self.consume_status_print_requests()
+        for _ in range(pending_status_prints):
             self.telemetry.print_navigation_status(
                 self.pose_estimator,
                 self.local_planner,
                 self.route_manager,
-                "RUN",
+                "MANUAL STATUS",
             )
-            self.last_status_print_time = now
 
         if now - self.last_marker_publish_time >= self.config.marker_publish_period:
             self.telemetry.publish_debug_markers(
