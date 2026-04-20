@@ -30,6 +30,20 @@ class RouteManager:
             return None
         return (self.target_x, self.target_y)
 
+    def _nearest_waypoint_index(self, current_xy):
+        if not self.path:
+            return 0
+
+        cx, cy = current_xy
+        best_idx = 0
+        best_dist = float("inf")
+        for idx, wp in enumerate(self.path):
+            d = math.hypot(wp[0] - cx, wp[1] - cy)
+            if d < best_dist:
+                best_dist = d
+                best_idx = idx
+        return best_idx
+
     def set_route(self, final_target, mandatory_waypoints, now):
         self.final_target = final_target
         self.global_waypoints = list(mandatory_waypoints)
@@ -77,7 +91,7 @@ class RouteManager:
                 self.global_waypoints.pop(0)
             self.pending_segment_target = None
             self.next_segment_retry_time = 0.0
-            self.current_wp_index = 0
+            self.current_wp_index = self._nearest_waypoint_index(current_xy)
             self.is_moving = True
             self.replan_fail_streak = 0
             self.best_distance_on_segment = math.hypot(self.target_x - current_xy[0], self.target_y - current_xy[1])
@@ -104,7 +118,7 @@ class RouteManager:
         new_path = self.planner.calculate_path(current_xy, self.target)
         if new_path:
             self.path = new_path
-            self.current_wp_index = 0
+            self.current_wp_index = self._nearest_waypoint_index(current_xy)
             self.is_moving = True
             self.replan_fail_streak = 0
             self.best_distance_on_segment = math.hypot(self.target_x - current_xy[0], self.target_y - current_xy[1])

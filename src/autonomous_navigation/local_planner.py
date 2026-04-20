@@ -224,6 +224,11 @@ class LocalPlanner:
                         move.twist.linear.x = min(self.config.wall_follow_speed, self.config.max_speed * 0.5)
                     move.twist.angular.z = max(min(ang_cmd, 0.9), -0.9)
 
+            # Opportunistic exit: if there is frontal clearance, try to recover A* path.
+            if self.line_of_sight_clear(0.8) and route_manager.try_replan_current_segment((current_x, current_y), now):
+                self.nav_state = "FOLLOW_GOAL"
+                return move
+
             if self.bug2_line_start is not None and self.bug2_line_goal is not None:
                 d_line = self.point_to_line_distance(
                     (current_x, current_y), self.bug2_line_start, self.bug2_line_goal
@@ -240,7 +245,9 @@ class LocalPlanner:
             return move
 
         if self.nav_state == "REJOIN_PATH":
-            if not route_manager.try_replan_current_segment((current_x, current_y), now):
+            if route_manager.try_replan_current_segment((current_x, current_y), now):
+                self.nav_state = "FOLLOW_GOAL"
+            elif now - route_manager.last_replan_attempt_time >= self.config.replan_cooldown:
                 self.nav_state = "WALL_FOLLOW"
             return move
 
