@@ -28,6 +28,11 @@ class NavigationConfig:
     kp_angular: float = 1.0
     xy_tolerance: float = 0.15
     yaw_tolerance: float = 0.1
+    yaw_stop_threshold: float = 0.65
+    follow_lookahead_distance: float = 0.45
+    min_motion_linear_speed: float = 0.06
+
+    path_min_waypoint_spacing: float = 0.30
 
     safe_stop_distance: float = 0.25
     caution_distance: float = 0.40

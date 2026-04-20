@@ -3,10 +3,62 @@ import math
 
 
 class GlobalPlanner:
-    def __init__(self, map_manager, inflation_radius=4):
+    def __init__(self, map_manager, inflation_radius=4, waypoint_spacing=0.30):
         self.map_manager = map_manager
         self.inflation_radius = inflation_radius
+        self.waypoint_spacing = waypoint_spacing
         self.last_error = ""
+
+    def _bresenham_cells(self, start_cell, end_cell):
+        x0, y0 = start_cell
+        x1, y1 = end_cell
+
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+
+        x, y = x0, y0
+        while True:
+            yield (x, y)
+            if x == x1 and y == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+
+    def _segment_is_free(self, a_cell, b_cell):
+        for gx, gy in self._bresenham_cells(a_cell, b_cell):
+            if not self.is_cell_free(gx, gy):
+                return False
+        return True
+
+    def _simplify_grid_path(self, path_grid):
+        if len(path_grid) <= 2:
+            return list(path_grid)
+
+        simplified = [path_grid[0]]
+        anchor_idx = 0
+
+        while anchor_idx < len(path_grid) - 1:
+            furthest_idx = anchor_idx + 1
+            probe_idx = furthest_idx
+            while probe_idx < len(path_grid):
+                if self._segment_is_free(path_grid[anchor_idx], path_grid[probe_idx]):
+                    furthest_idx = probe_idx
+                    probe_idx += 1
+                else:
+                    break
+
+            simplified.append(path_grid[furthest_idx])
+            anchor_idx = furthest_idx
+
+        return simplified
 
     def is_cell_free(self, gx, gy):
         if not self.map_manager.in_bounds(gx, gy):
@@ -117,7 +169,18 @@ class GlobalPlanner:
             curr = came_from[curr]
         path_grid.reverse()
 
-        world_path = [self.map_manager.grid_to_world(*p) for p in path_grid]
+        simplified_grid = self._simplify_grid_path(path_grid)
+
+        world_path = []
+        for cell in simplified_grid:
+            wp = self.map_manager.grid_to_world(*cell)
+            if not world_path:
+                world_path.append(wp)
+                continue
+
+            if math.hypot(wp[0] - world_path[-1][0], wp[1] - world_path[-1][1]) >= self.waypoint_spacing:
+                world_path.append(wp)
+
         final_wp = self.map_manager.grid_to_world(*end_grid)
         sampled = list(world_path)
         if not sampled:

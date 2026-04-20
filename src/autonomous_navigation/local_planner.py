@@ -169,6 +169,9 @@ class LocalPlanner:
         turn_sign = -1.0 if self.wall_follow_side == "right" else 1.0
         move.twist.angular.z = turn_sign * self.config.avoid_turn_speed
 
+    def _distance_to(self, x0, y0, x1, y1):
+        return math.hypot(x1 - x0, y1 - y0)
+
     def step(self, now, pose_estimator, route_manager):
         move = TwistStamped()
 
@@ -334,22 +337,47 @@ class LocalPlanner:
             route_manager.start_next_segment((current_x, current_y), now)
             return move
 
-        wp_x, wp_y = route_manager.path[route_manager.current_wp_index]
+        while route_manager.current_wp_index < (len(route_manager.path) - 1):
+            cwp_x, cwp_y = route_manager.path[route_manager.current_wp_index]
+            if self._distance_to(current_x, current_y, cwp_x, cwp_y) < self.config.xy_tolerance:
+                route_manager.current_wp_index += 1
+            else:
+                break
+
+        if route_manager.current_wp_index >= len(route_manager.path):
+            return move
+
+        pursuit_index = route_manager.current_wp_index
+        while pursuit_index < (len(route_manager.path) - 1):
+            p_x, p_y = route_manager.path[pursuit_index]
+            if self._distance_to(current_x, current_y, p_x, p_y) < self.config.follow_lookahead_distance:
+                pursuit_index += 1
+            else:
+                break
+
+        wp_x, wp_y = route_manager.path[pursuit_index]
         dx = wp_x - current_x
         dy = wp_y - current_y
         dist = math.hypot(dx, dy)
         yaw_err = normalize_angle(math.atan2(dy, dx) - current_yaw)
 
-        if dist < self.config.xy_tolerance:
+        if pursuit_index == (len(route_manager.path) - 1) and dist < self.config.xy_tolerance:
             route_manager.current_wp_index += 1
             return move
 
-        if abs(yaw_err) > self.config.yaw_tolerance:
+        if abs(yaw_err) > self.config.yaw_stop_threshold:
             move.twist.linear.x = 0.0
             move.twist.angular.z = max(min(yaw_err * self.config.kp_angular, 1.0), -1.0)
         else:
             max_allowed = self.config.max_speed if self.min_front_dist > self.config.caution_distance else self.config.wall_follow_speed
-            move.twist.linear.x = min(dist * self.config.kp_linear, max_allowed)
-            move.twist.angular.z = yaw_err * self.config.kp_angular
+            ang_ratio = min(abs(yaw_err) / max(self.config.yaw_stop_threshold, 1e-6), 1.0)
+            speed_scale = 1.0 - (0.75 * ang_ratio)
+            lin_cmd = min(dist * self.config.kp_linear, max_allowed) * speed_scale
+
+            if lin_cmd > 0.0:
+                lin_cmd = max(lin_cmd, min(self.config.min_motion_linear_speed, max_allowed))
+
+            move.twist.linear.x = lin_cmd
+            move.twist.angular.z = max(min(yaw_err * self.config.kp_angular, 1.0), -1.0)
 
         return move
