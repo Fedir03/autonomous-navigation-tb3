@@ -16,7 +16,7 @@ class LocalPlanner:
         self.min_right_dist = float("inf")
 
         # FSM state
-        self.nav_state = "FOLLOW_GOAL"  # FOLLOW_GOAL | AVOID_OBSTACLE | WALL_FOLLOW | REJOIN_PATH | BACKUP
+        self.nav_state = "FOLLOW_GOAL"  # FOLLOW_GOAL | AVOID_OBSTACLE | WALL_FOLLOW | REJOIN_PATH | BACKUP | DOOR_ADVANCE_Y | DOOR_TURN_LEFT | DOOR_CROSS_X
         self.wall_follow_side = "right"
         self.wall_follow_hit_distance = float("inf")
         self.bug2_line_start = None
@@ -26,6 +26,11 @@ class LocalPlanner:
 
         self.follow_obstacle_hit_count = 0
         self.follow_obstacle_hit_last_time = 0.0
+
+        self.door_ref_yaw = 0.0
+        self.door_turn_target_yaw = 0.0
+        self.door_segment_start_time = 0.0
+        self.door_segment_start_xy = None
 
     def reset_for_new_route(self):
         self.nav_state = "FOLLOW_GOAL"
@@ -37,6 +42,52 @@ class LocalPlanner:
         self.wall_follow_enter_time = 0.0
         self.follow_obstacle_hit_count = 0
         self.follow_obstacle_hit_last_time = 0.0
+
+        self.door_ref_yaw = 0.0
+        self.door_turn_target_yaw = 0.0
+        self.door_segment_start_time = 0.0
+        self.door_segment_start_xy = None
+
+    def _start_door_transition(self, current_x, current_y, current_yaw, now):
+        self.nav_state = "DOOR_ADVANCE_Y"
+        self.door_ref_yaw = current_yaw
+        self.door_turn_target_yaw = normalize_angle(current_yaw + (math.pi / 2.0))
+        self.door_segment_start_time = now
+        self.door_segment_start_xy = (current_x, current_y)
+
+    def _step_door_transition(self, move, now, current_x, current_y, current_yaw, route_manager):
+        if self.nav_state == "DOOR_ADVANCE_Y":
+            yaw_err = normalize_angle(self.door_ref_yaw - current_yaw)
+            move.twist.linear.x = min(self.config.door_follow_speed, self.config.max_speed * 0.8)
+            move.twist.angular.z = max(min(yaw_err * self.config.door_heading_kp, 0.8), -0.8)
+
+            enough_forward_time = (now - self.door_segment_start_time) >= self.config.door_min_forward_time_before_left_check
+            if enough_forward_time and self.min_left_dist > self.config.door_left_opening_distance:
+                self.nav_state = "DOOR_TURN_LEFT"
+            return move
+
+        if self.nav_state == "DOOR_TURN_LEFT":
+            yaw_err = normalize_angle(self.door_turn_target_yaw - current_yaw)
+            move.twist.linear.x = 0.0
+            move.twist.angular.z = max(min(yaw_err * self.config.kp_angular, self.config.door_turn_speed), -self.config.door_turn_speed)
+
+            if abs(yaw_err) < self.config.door_turn_tolerance:
+                self.nav_state = "DOOR_CROSS_X"
+                self.door_segment_start_xy = (current_x, current_y)
+            return move
+
+        # DOOR_CROSS_X
+        yaw_err = normalize_angle(self.door_turn_target_yaw - current_yaw)
+        move.twist.linear.x = min(self.config.door_follow_speed, self.config.max_speed * 0.8)
+        move.twist.angular.z = max(min(yaw_err * self.config.door_heading_kp, 0.8), -0.8)
+
+        if self.door_segment_start_xy is not None:
+            dx = current_x - self.door_segment_start_xy[0]
+            dy = current_y - self.door_segment_start_xy[1]
+            if math.hypot(dx, dy) >= self.config.door_cross_x_distance:
+                self.nav_state = "FOLLOW_GOAL"
+                route_manager.complete_door_transition((current_x, current_y), now)
+        return move
 
     def scan_callback(self, msg):
         try:
@@ -140,6 +191,14 @@ class LocalPlanner:
             # Recovered clearance: continue with normal obstacle handling.
             self.nav_state = "AVOID_OBSTACLE"
 
+        if self.nav_state in ["DOOR_ADVANCE_Y", "DOOR_TURN_LEFT", "DOOR_CROSS_X"]:
+            # Keep hard front safety even during door transition maneuver.
+            if self.min_front_dist < self.config.safe_stop_distance and self.nav_state != "DOOR_TURN_LEFT":
+                move.twist.linear.x = 0.0
+                move.twist.angular.z = 0.0
+                return move
+            return self._step_door_transition(move, now, current_x, current_y, current_yaw, route_manager)
+
         # If there is no active path, retry pending segments and keep local escape active if needed.
         if (not route_manager.is_moving) or (not route_manager.path):
             if route_manager.pending_segment_target is not None and now >= route_manager.next_segment_retry_time:
@@ -155,7 +214,7 @@ class LocalPlanner:
                         now,
                     )
 
-            if self.nav_state in ["WALL_FOLLOW", "AVOID_OBSTACLE", "REJOIN_PATH", "BACKUP"] and route_manager.target is not None:
+            if self.nav_state in ["WALL_FOLLOW", "AVOID_OBSTACLE", "REJOIN_PATH", "BACKUP", "DOOR_ADVANCE_Y", "DOOR_TURN_LEFT", "DOOR_CROSS_X"] and (route_manager.target is not None or route_manager.door_transition_active):
                 route_manager.is_moving = True
             else:
                 return move
@@ -269,6 +328,9 @@ class LocalPlanner:
 
         if route_manager.current_wp_index >= len(route_manager.path):
             self.logger.info("Segment reached.")
+            if route_manager.begin_door_transition_if_needed():
+                self._start_door_transition(current_x, current_y, current_yaw, now)
+                return move
             route_manager.start_next_segment((current_x, current_y), now)
             return move
 

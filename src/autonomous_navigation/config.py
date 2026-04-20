@@ -50,6 +50,21 @@ class NavigationConfig:
     backup_min_front_distance: float = 0.20
     backup_speed: float = 0.08
 
+    # Door-first routing rule for upper room objectives.
+    door_required_y_threshold: float = 8.5
+    door_forced_targets: Tuple[str, ...] = ("O", "P", "Q", "R")
+    door_progress_min_delta_y: float = 0.2
+
+    # Lidar-guided maneuver after crossing DOOR:
+    # 1) advance forward, 2) detect opening on the left, 3) turn left 90deg, 4) cross second door.
+    door_follow_speed: float = 0.10
+    door_heading_kp: float = 1.6
+    door_turn_speed: float = 0.7
+    door_left_opening_distance: float = 1.2
+    door_min_forward_time_before_left_check: float = 0.8
+    door_cross_x_distance: float = 0.9
+    door_turn_tolerance: float = 0.12
+
     status_print_period: float = 1.0
     marker_publish_period: float = 0.5
 

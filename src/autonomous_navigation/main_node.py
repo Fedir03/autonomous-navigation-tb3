@@ -106,6 +106,32 @@ class PointAToBNode(Node):
         finally:
             self.awaiting_user_input = False
 
+    def build_mandatory_route(self, target_external, target_name=None):
+        tx, ty = target_external
+        route_external = []
+
+        forced_by_name = target_name in self.config.door_forced_targets if target_name is not None else False
+        needs_door = forced_by_name or (ty > self.config.door_required_y_threshold)
+        door_external = KEY_POINTS["DOOR"]
+
+        if needs_door:
+            route_external.append(door_external)
+
+        route_external.append((tx, ty))
+
+        route_internal = []
+        compact_external = []
+        for ext_wp in route_external:
+            int_wp = self.coords.to_internal_xy(ext_wp[0], ext_wp[1])
+            if route_internal:
+                if math.hypot(int_wp[0] - route_internal[-1][0], int_wp[1] - route_internal[-1][1]) < 0.05:
+                    continue
+            route_internal.append(int_wp)
+            compact_external.append(ext_wp)
+
+        door_internal = self.coords.to_internal_xy(door_external[0], door_external[1]) if needs_door else None
+        return route_internal, compact_external, needs_door, door_internal
+
     def queue_status_print(self):
         with self.status_lock:
             self.status_print_requests += 1
@@ -280,12 +306,18 @@ class PointAToBNode(Node):
                     continue
 
                 final_pos = None
+                final_external = None
+                target_name = None
                 if user_in in KEY_POINTS:
-                    final_pos = self.coords.to_internal_xy(KEY_POINTS[user_in][0], KEY_POINTS[user_in][1])
+                    final_external = KEY_POINTS[user_in]
+                    target_name = user_in
                 else:
                     parts = user_in.split(",")
                     if len(parts) == 2:
-                        final_pos = self.coords.to_internal_xy(float(parts[0]), float(parts[1]))
+                        final_external = (float(parts[0]), float(parts[1]))
+
+                if final_external is not None:
+                    final_pos = self.coords.to_internal_xy(final_external[0], final_external[1])
 
                 if not final_pos:
                     print("Invalid input.")
@@ -295,18 +327,26 @@ class PointAToBNode(Node):
                     print("Cannot localize robot in map frame yet.")
                     continue
 
-                b_wp = self.coords.to_internal_xy(KEY_POINTS["B"][0], KEY_POINTS["B"][1])
-                o_wp = self.coords.to_internal_xy(KEY_POINTS["O"][0], KEY_POINTS["O"][1])
+                mandatory_internal, mandatory_external, needs_door_transition, door_internal = self.build_mandatory_route(
+                    final_external,
+                    target_name,
+                )
 
                 now = time.time()
-                self.route_manager.set_route(final_pos, [b_wp, o_wp, final_pos], now)
+                self.route_manager.set_route(
+                    final_pos,
+                    mandatory_internal,
+                    now,
+                    door_transition_required=needs_door_transition,
+                    door_waypoint=door_internal,
+                )
                 self.local_planner.reset_for_new_route()
 
+                route_steps = " -> ".join("({:.2f}, {:.2f})".format(p[0], p[1]) for p in mandatory_external)
+
                 print(
-                    "Route set (external): Start -> B {} -> O {} -> Target {}".format(
-                        KEY_POINTS["B"],
-                        KEY_POINTS["O"],
-                        self.coords.format_external_xy(final_pos),
+                    "Route set (external): Start -> {}".format(
+                        route_steps,
                     )
                 )
 

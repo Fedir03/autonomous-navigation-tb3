@@ -24,6 +24,11 @@ class RouteManager:
         self.best_distance_on_segment = float("inf")
         self.last_progress_time = 0.0
 
+        self.door_transition_required = False
+        self.door_transition_done = False
+        self.door_transition_active = False
+        self.door_transition_waypoint = None
+
     @property
     def target(self):
         if self.target_x is None or self.target_y is None:
@@ -44,7 +49,7 @@ class RouteManager:
                 best_idx = idx
         return best_idx
 
-    def set_route(self, final_target, mandatory_waypoints, now):
+    def set_route(self, final_target, mandatory_waypoints, now, door_transition_required=False, door_waypoint=None):
         self.final_target = final_target
         self.global_waypoints = list(mandatory_waypoints)
         self.pending_segment_target = None
@@ -60,6 +65,11 @@ class RouteManager:
         self.best_distance_on_segment = float("inf")
         self.last_progress_time = now
 
+        self.door_transition_required = door_transition_required
+        self.door_transition_done = False
+        self.door_transition_active = False
+        self.door_transition_waypoint = door_waypoint
+
     def clear_route(self):
         self.target_x = None
         self.target_y = None
@@ -70,6 +80,43 @@ class RouteManager:
         self.global_waypoints = []
         self.pending_segment_target = None
         self.next_segment_retry_time = 0.0
+
+        self.door_transition_required = False
+        self.door_transition_done = False
+        self.door_transition_active = False
+        self.door_transition_waypoint = None
+
+    def begin_door_transition_if_needed(self):
+        if (not self.door_transition_required) or self.door_transition_done or self.door_transition_active:
+            return False
+
+        if self.door_transition_waypoint is None or self.target is None:
+            return False
+
+        d = math.hypot(
+            self.target_x - self.door_transition_waypoint[0],
+            self.target_y - self.door_transition_waypoint[1],
+        )
+        if d > 0.35:
+            return False
+
+        self.door_transition_active = True
+        self.path = []
+        self.current_wp_index = 0
+        self.is_moving = True
+        return True
+
+    def complete_door_transition(self, current_xy, now):
+        if not self.door_transition_active:
+            return False
+
+        self.door_transition_active = False
+        self.door_transition_done = True
+        self.target_x = None
+        self.target_y = None
+        self.path = []
+        self.current_wp_index = 0
+        return self.start_next_segment(current_xy, now)
 
     def start_next_segment(self, current_xy, now):
         if self.pending_segment_target is None and not self.global_waypoints:
