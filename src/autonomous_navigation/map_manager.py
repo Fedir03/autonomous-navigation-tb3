@@ -2,7 +2,9 @@ from nav_msgs.msg import OccupancyGrid
 
 
 class MapManager:
-    def __init__(self):
+    def __init__(self, prefer_base_map_for_planning=True):
+        self.prefer_base_map_for_planning = prefer_base_map_for_planning
+
         # Dynamic map (/map)
         self.map_data = None
         self.map_resolution = 0.05
@@ -19,6 +21,32 @@ class MapManager:
         self.base_map_height = 0
         self.base_map_received = False
 
+        self._alignment_status_logged = False
+
+    def active_map_source(self):
+        if self.prefer_base_map_for_planning and self.base_map_received:
+            return "base"
+        if self.map_received:
+            return "slam"
+        if self.base_map_received:
+            return "base"
+        return "none"
+
+    def _log_alignment_status(self, logger=None):
+        if self._alignment_status_logged or logger is None:
+            return
+        if not (self.map_received and self.base_map_received):
+            return
+
+        if self.maps_aligned():
+            logger.info("SLAM map and base_map aligned. Planner can combine both occupancies.")
+        else:
+            logger.warn(
+                "SLAM map and base_map are NOT aligned (size/resolution/origin mismatch). "
+                "Planner will rely on active map source only."
+            )
+        self._alignment_status_logged = True
+
     def map_callback(self, msg: OccupancyGrid, logger=None):
         self.map_data = msg.data
         self.map_resolution = msg.info.resolution
@@ -31,6 +59,7 @@ class MapManager:
                     f"SLAM map received: {self.map_width}x{self.map_height} @ {self.map_resolution}m/px"
                 )
             self.map_received = True
+        self._log_alignment_status(logger)
 
     def base_map_callback(self, msg: OccupancyGrid, logger=None):
         self.base_map_data = msg.data
@@ -44,11 +73,13 @@ class MapManager:
                     f"Base map received: {self.base_map_width}x{self.base_map_height} @ {self.base_map_resolution}m/px"
                 )
             self.base_map_received = True
+        self._log_alignment_status(logger)
 
     def get_active_map_info(self):
-        if self.map_received:
+        source = self.active_map_source()
+        if source == "slam":
             return self.map_width, self.map_height, self.map_resolution, self.map_origin
-        if self.base_map_received:
+        if source == "base":
             return self.base_map_width, self.base_map_height, self.base_map_resolution, self.base_map_origin
         return 0, 0, 0.05, [0.0, 0.0]
 
@@ -90,24 +121,29 @@ class MapManager:
         return (wx, wy)
 
     def get_cell_occupancy(self, gx, gy):
-        dyn = None
-        base = None
+        source = self.active_map_source()
+        active_val = None
+        other_val = None
 
-        if self.map_received and 0 <= gx < self.map_width and 0 <= gy < self.map_height:
-            idx_dyn = gy * self.map_width + gx
-            dyn = self.map_data[idx_dyn]
+        if source == "base":
+            if self.base_map_received and 0 <= gx < self.base_map_width and 0 <= gy < self.base_map_height:
+                idx = gy * self.base_map_width + gx
+                active_val = self.base_map_data[idx]
 
-        if self.base_map_received:
-            if self.map_received:
-                if self.maps_aligned() and 0 <= gx < self.base_map_width and 0 <= gy < self.base_map_height:
-                    idx_base = gy * self.base_map_width + gx
-                    base = self.base_map_data[idx_base]
-            else:
-                if 0 <= gx < self.base_map_width and 0 <= gy < self.base_map_height:
-                    idx_base = gy * self.base_map_width + gx
-                    base = self.base_map_data[idx_base]
+            if self.maps_aligned() and self.map_received and 0 <= gx < self.map_width and 0 <= gy < self.map_height:
+                idx = gy * self.map_width + gx
+                other_val = self.map_data[idx]
 
-        vals = [v for v in [dyn, base] if v is not None and v >= 0]
+        elif source == "slam":
+            if self.map_received and 0 <= gx < self.map_width and 0 <= gy < self.map_height:
+                idx = gy * self.map_width + gx
+                active_val = self.map_data[idx]
+
+            if self.maps_aligned() and self.base_map_received and 0 <= gx < self.base_map_width and 0 <= gy < self.base_map_height:
+                idx = gy * self.base_map_width + gx
+                other_val = self.base_map_data[idx]
+
+        vals = [v for v in [active_val, other_val] if v is not None and v >= 0]
         if not vals:
             return -1
         return max(vals)

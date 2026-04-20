@@ -20,6 +20,7 @@ KEY_POINTS: Dict[str, Tuple[float, float]] = {
 @dataclass
 class NavigationConfig:
     swap_xy: bool = False
+    prefer_base_map_for_planning: bool = True
 
     inflation_radius: int = 4
 

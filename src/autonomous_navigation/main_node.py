@@ -30,7 +30,7 @@ class PointAToBNode(Node):
         self.config = NavigationConfig()
         self.coords = CoordinateAdapter(self.config.swap_xy)
 
-        self.map_manager = MapManager()
+        self.map_manager = MapManager(self.config.prefer_base_map_for_planning)
         self.pose_estimator = PoseEstimator(self)
         self.global_planner = GlobalPlanner(
             self.map_manager,
