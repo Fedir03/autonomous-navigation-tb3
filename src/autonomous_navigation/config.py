@@ -22,6 +22,9 @@ KEY_POINTS: Dict[str, Tuple[float, float]] = {
 class NavigationConfig:
     swap_xy: bool = False
     prefer_base_map_for_planning: bool = True
+    # If True, /base_map is interpreted in external/professor coordinates and
+    # transformed to SLAM map coordinates using the initial-pose alignment.
+    base_map_in_external_frame: bool = True
 
     inflation_radius: int = 4
 

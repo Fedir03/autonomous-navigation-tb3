@@ -1,7 +1,8 @@
 image: base_map.pgm
 mode: trinary
-# Initial calibration for map_100_bw (1310x1005). Fine-tune with RViz overlay checks.
-resolution: 0.01
+# Base map is expressed in external/professor frame.
+# Runtime alignment to SLAM map frame is applied from the entered initial pose.
+resolution: 0.0154173
 origin: [0.0, 0.0, 0.0]
 negate: 0
 occupied_thresh: 0.65

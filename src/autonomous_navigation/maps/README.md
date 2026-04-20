@@ -2,7 +2,8 @@ Base map files for autonomous_navigation.
 
 Current setup:
 1. base_map.pgm is generated from map_100_bw.png (recommended for precision).
-2. base_map.yaml starts with resolution 0.01 m/px as initial calibration.
+2. base_map.yaml uses external/professor frame as reference.
+3. Runtime alignment to SLAM map is computed from the initial pose entered in autonomous_navigation.
 
 Run:
 1. cd /home/fedir/ROB
@@ -16,8 +17,7 @@ RViz calibration quick loop:
 2. Set alpha around 0.5 and compare wall overlap.
 3. Tune base_map.yaml:
    - resolution: scale mismatch (bigger/smaller map)
-   - origin[0], origin[1]: XY shift mismatch
-   - origin[2]: rotation mismatch (radians)
+   - keep origin close to [0, 0, 0] when using runtime initial-pose alignment
 4. Rebuild and relaunch after YAML changes.
 
 Notes:

@@ -2,8 +2,10 @@ from nav_msgs.msg import OccupancyGrid
 
 
 class MapManager:
-    def __init__(self, prefer_base_map_for_planning=True):
+    def __init__(self, coord_adapter=None, prefer_base_map_for_planning=True, base_map_in_external_frame=True):
+        self.coord_adapter = coord_adapter
         self.prefer_base_map_for_planning = prefer_base_map_for_planning
+        self.base_map_in_external_frame = base_map_in_external_frame
 
         # Dynamic map (/map)
         self.map_data = None
@@ -36,6 +38,13 @@ class MapManager:
         if self._alignment_status_logged or logger is None:
             return
         if not (self.map_received and self.base_map_received):
+            return
+
+        if self.base_map_in_external_frame:
+            logger.info(
+                "Using base_map in external frame with runtime alignment from initial pose."
+            )
+            self._alignment_status_logged = True
             return
 
         if self.maps_aligned():
@@ -95,19 +104,55 @@ class MapManager:
         )
 
     def world_to_grid(self, x, y):
-        width, height, resolution, origin = self.get_active_map_info()
-        if width <= 0 or height <= 0:
-            return None
-        gx = int((x - origin[0]) / resolution)
-        gy = int((y - origin[1]) / resolution)
-        return (gx, gy)
+        source = self.active_map_source()
+
+        if source == "slam":
+            width = self.map_width
+            height = self.map_height
+            resolution = self.map_resolution
+            origin = self.map_origin
+            if width <= 0 or height <= 0:
+                return None
+            gx = int((x - origin[0]) / resolution)
+            gy = int((y - origin[1]) / resolution)
+            return (gx, gy)
+
+        if source == "base":
+            width = self.base_map_width
+            height = self.base_map_height
+            resolution = self.base_map_resolution
+            origin = self.base_map_origin
+            if width <= 0 or height <= 0:
+                return None
+
+            bx, by = x, y
+            if self.base_map_in_external_frame and self.coord_adapter is not None:
+                bx, by = self.coord_adapter.to_external_xy(x, y)
+
+            gx = int((bx - origin[0]) / resolution)
+            gy = int((by - origin[1]) / resolution)
+            return (gx, gy)
+
+        return None
 
     def in_bounds(self, gx, gy):
-        width, height, _, _ = self.get_active_map_info()
+        source = self.active_map_source()
+        if source == "base":
+            width = self.base_map_width
+            height = self.base_map_height
+        else:
+            width = self.map_width
+            height = self.map_height
         return 0 <= gx < width and 0 <= gy < height
 
     def clamp_to_map(self, gx, gy):
-        width, height, _, _ = self.get_active_map_info()
+        source = self.active_map_source()
+        if source == "base":
+            width = self.base_map_width
+            height = self.base_map_height
+        else:
+            width = self.map_width
+            height = self.map_height
         if width <= 0 or height <= 0:
             return (gx, gy)
         gx = min(max(gx, 0), width - 1)
@@ -115,7 +160,20 @@ class MapManager:
         return (gx, gy)
 
     def grid_to_world(self, gx, gy):
-        _, _, resolution, origin = self.get_active_map_info()
+        source = self.active_map_source()
+
+        if source == "base":
+            resolution = self.base_map_resolution
+            origin = self.base_map_origin
+            bx = (gx * resolution) + origin[0] + (resolution / 2)
+            by = (gy * resolution) + origin[1] + (resolution / 2)
+
+            if self.base_map_in_external_frame and self.coord_adapter is not None:
+                return self.coord_adapter.to_internal_xy(bx, by)
+            return (bx, by)
+
+        resolution = self.map_resolution
+        origin = self.map_origin
         wx = (gx * resolution) + origin[0] + (resolution / 2)
         wy = (gy * resolution) + origin[1] + (resolution / 2)
         return (wx, wy)
