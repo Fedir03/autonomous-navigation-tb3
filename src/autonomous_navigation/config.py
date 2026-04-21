@@ -80,12 +80,12 @@ class NavigationConfig:
     # Door transition behavior (user/external frame references).
     door_align_tolerance: float = 0.10
     door_heading_kp: float = 1.4
-    door_forward_speed: float = 0.08
+    door_forward_speed: float = 0.12
     door_left_opening_distance: float = 1.2
     door_search_min_time: float = 0.7
     door_left_center_x: float = 7.30
     door_left_center_x_tolerance: float = 0.18
-    door_second_cross_distance: float = 0.90
+    door_second_cross_distance: float = 3.00
 
     status_print_period: float = 1.0
     marker_publish_period: float = 0.5
