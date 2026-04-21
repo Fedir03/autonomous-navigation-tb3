@@ -41,6 +41,9 @@ class PointAToBNode(Node):
             self.map_manager,
             self.config.inflation_radius_m,
             self.config.nearest_free_search_radius_m,
+            self.config.treat_unknown_as_free,
+            self.config.planner_heuristic_weight,
+            self.config.planner_directness_bias,
             self.config.path_min_waypoint_spacing,
         )
         self.route_manager = RouteManager(self.global_planner, self.config, self.get_logger())

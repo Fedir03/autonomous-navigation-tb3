@@ -33,8 +33,11 @@ class NavigationConfig:
     base_map_reference_origin_map_xy: Tuple[float, float] = (-1.590, -4.627)
 
     # Global planner obstacle inflation in meters (resolution-independent).
-    inflation_radius_m: float = 0.22
+    inflation_radius_m: float = 0.14
     nearest_free_search_radius_m: float = 0.70
+    treat_unknown_as_free: bool = True
+    planner_heuristic_weight: float = 1.05
+    planner_directness_bias: float = 0.12
 
     max_speed: float = 0.18
     kp_linear: float = 0.5

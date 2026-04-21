@@ -8,11 +8,17 @@ class GlobalPlanner:
         map_manager,
         inflation_radius_m=0.22,
         nearest_free_search_radius_m=0.70,
+        treat_unknown_as_free=True,
+        heuristic_weight=1.02,
+        directness_bias=0.08,
         waypoint_spacing=0.30,
     ):
         self.map_manager = map_manager
         self.inflation_radius_m = inflation_radius_m
         self.nearest_free_search_radius_m = nearest_free_search_radius_m
+        self.treat_unknown_as_free = treat_unknown_as_free
+        self.heuristic_weight = heuristic_weight
+        self.directness_bias = directness_bias
         self.waypoint_spacing = waypoint_spacing
         self.last_error = ""
 
@@ -57,6 +63,16 @@ class GlobalPlanner:
                 return False
         return True
 
+    def _point_line_distance_cells(self, p, a, b):
+        ax, ay = a
+        bx, by = b
+        px, py = p
+        den = math.hypot(bx - ax, by - ay)
+        if den < 1e-6:
+            return math.hypot(px - ax, py - ay)
+        num = abs((by - ay) * px - (bx - ax) * py + bx * ay - by * ax)
+        return num / den
+
     def _simplify_grid_path(self, path_grid):
         if len(path_grid) <= 2:
             return list(path_grid)
@@ -84,6 +100,8 @@ class GlobalPlanner:
             return False
 
         occ = self.map_manager.get_cell_occupancy(gx, gy)
+        if occ < 0 and self.treat_unknown_as_free:
+            occ = 0
         if occ > 50:
             return False
 
@@ -92,7 +110,10 @@ class GlobalPlanner:
             for dy in range(-r, r + 1):
                 nx, ny = gx + dx, gy + dy
                 if self.map_manager.in_bounds(nx, ny):
-                    if self.map_manager.get_cell_occupancy(nx, ny) > 50:
+                    n_occ = self.map_manager.get_cell_occupancy(nx, ny)
+                    if n_occ < 0 and self.treat_unknown_as_free:
+                        n_occ = 0
+                    if n_occ > 50:
                         return False
         return True
 
@@ -109,13 +130,20 @@ class GlobalPlanner:
             return (gx, gy)
 
         for radius in range(1, max_radius + 1):
+            best = None
+            best_d2 = float("inf")
             for dx in range(-radius, radius + 1):
                 for dy in range(-radius, radius + 1):
                     if abs(dx) != radius and abs(dy) != radius:
                         continue
                     nx, ny = gx + dx, gy + dy
                     if self.map_manager.in_bounds(nx, ny) and self.is_cell_free(nx, ny):
-                        return (nx, ny)
+                        d2 = (nx - gx) * (nx - gx) + (ny - gy) * (ny - gy)
+                        if d2 < best_d2:
+                            best = (nx, ny)
+                            best_d2 = d2
+            if best is not None:
+                return best
         return None
 
     def _try_slam_fallback(self, start_xy, end_xy, reason):
@@ -198,9 +226,19 @@ class GlobalPlanner:
                     new_cost = cost_so_far[current] + step_cost
                     if neighbor not in cost_so_far or new_cost < cost_so_far[neighbor]:
                         cost_so_far[neighbor] = new_cost
-                        priority = new_cost + math.hypot(
+                        goal_h = math.hypot(
                             end_grid[0] - neighbor[0],
                             end_grid[1] - neighbor[1],
+                        )
+                        line_dev = self._point_line_distance_cells(
+                            neighbor,
+                            start_grid,
+                            end_grid,
+                        )
+                        priority = (
+                            new_cost
+                            + (self.heuristic_weight * goal_h)
+                            + (self.directness_bias * line_dev)
                         )
                         heapq.heappush(frontier, (priority, neighbor))
                         came_from[neighbor] = current
