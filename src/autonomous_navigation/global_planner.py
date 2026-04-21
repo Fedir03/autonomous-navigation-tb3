@@ -3,11 +3,24 @@ import math
 
 
 class GlobalPlanner:
-    def __init__(self, map_manager, inflation_radius=4, waypoint_spacing=0.30):
+    def __init__(self, map_manager, inflation_radius_m=0.22, nearest_free_search_radius_m=0.70, waypoint_spacing=0.30):
         self.map_manager = map_manager
-        self.inflation_radius = inflation_radius
+        self.inflation_radius_m = inflation_radius_m
+        self.nearest_free_search_radius_m = nearest_free_search_radius_m
         self.waypoint_spacing = waypoint_spacing
         self.last_error = ""
+
+    def _inflation_radius_cells(self):
+        _, _, resolution, _ = self.map_manager.get_active_map_info()
+        if resolution <= 1e-6:
+            return 1
+        return max(1, int(math.ceil(self.inflation_radius_m / resolution)))
+
+    def _nearest_free_max_radius_cells(self):
+        _, _, resolution, _ = self.map_manager.get_active_map_info()
+        if resolution <= 1e-6:
+            return 25
+        return max(1, int(math.ceil(self.nearest_free_search_radius_m / resolution)))
 
     def _bresenham_cells(self, start_cell, end_cell):
         x0, y0 = start_cell
@@ -68,7 +81,7 @@ class GlobalPlanner:
         if occ > 50:
             return False
 
-        r = self.inflation_radius
+        r = self._inflation_radius_cells()
         for dx in range(-r, r + 1):
             for dy in range(-r, r + 1):
                 nx, ny = gx + dx, gy + dy
@@ -77,10 +90,13 @@ class GlobalPlanner:
                         return False
         return True
 
-    def find_nearest_free_cell(self, gx, gy, max_radius=25):
+    def find_nearest_free_cell(self, gx, gy, max_radius=None):
         width, height, _, _ = self.map_manager.get_active_map_info()
         if width <= 0 or height <= 0:
             return None
+
+        if max_radius is None:
+            max_radius = self._nearest_free_max_radius_cells()
 
         gx, gy = self.map_manager.clamp_to_map(gx, gy)
         if self.is_cell_free(gx, gy):

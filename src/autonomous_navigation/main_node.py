@@ -37,7 +37,8 @@ class PointAToBNode(Node):
         self.pose_estimator = PoseEstimator(self)
         self.global_planner = GlobalPlanner(
             self.map_manager,
-            self.config.inflation_radius,
+            self.config.inflation_radius_m,
+            self.config.nearest_free_search_radius_m,
             self.config.path_min_waypoint_spacing,
         )
         self.route_manager = RouteManager(self.global_planner, self.config, self.get_logger())

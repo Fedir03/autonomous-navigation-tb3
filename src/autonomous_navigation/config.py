@@ -23,7 +23,9 @@ class NavigationConfig:
     swap_xy: bool = False
     prefer_base_map_for_planning: bool = False
 
-    inflation_radius: int = 4
+    # Global planner obstacle inflation in meters (resolution-independent).
+    inflation_radius_m: float = 0.22
+    nearest_free_search_radius_m: float = 0.70
 
     max_speed: float = 0.18
     kp_linear: float = 0.5
@@ -39,6 +41,8 @@ class NavigationConfig:
     safe_stop_distance: float = 0.25
     caution_distance: float = 0.40
     follow_block_trigger_distance: float = 0.28
+    collision_stop_distance: float = 0.18
+    turn_side_clearance: float = 0.20
 
     wall_follow_distance: float = 0.45
     avoid_turn_speed: float = 0.6
