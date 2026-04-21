@@ -9,6 +9,7 @@ KEY_POINTS: Dict[str, Tuple[float, float]] = {
     "C": (4.880, 2.535),
     "D": (5.080, 5.740),
     "E": (5.880, 8.145),
+    "F": (5.480, 10.545),
     "DOOR": (6.280, 11.685),
     "Q": (9.115, 14.590),
     "R": (7.310, 16.190),
@@ -22,6 +23,14 @@ KEY_POINTS: Dict[str, Tuple[float, float]] = {
 class NavigationConfig:
     swap_xy: bool = False
     prefer_base_map_for_planning: bool = False
+
+    # Base-map dynamic alignment from initial user pose.
+    base_map_dynamic_alignment_enabled: bool = True
+    # Reference pair provided from manual calibration:
+    # when initial pose is (4.880, 2.535), base_map origin in map frame is
+    # (-1.590, -4.627).
+    base_map_reference_initial_external_xy: Tuple[float, float] = (4.880, 2.535)
+    base_map_reference_origin_map_xy: Tuple[float, float] = (-1.590, -4.627)
 
     # Global planner obstacle inflation in meters (resolution-independent).
     inflation_radius_m: float = 0.22

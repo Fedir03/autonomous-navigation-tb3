@@ -18,11 +18,24 @@ class MapManager:
         self.base_map_data = None
         self.base_map_resolution = 0.05
         self.base_map_origin = [0.0, 0.0]
+        self.base_map_origin_override = None
         self.base_map_width = 0
         self.base_map_height = 0
         self.base_map_received = False
 
         self._alignment_status_logged = False
+
+    def set_base_map_origin_override(self, origin_xy):
+        if origin_xy is None:
+            self.base_map_origin_override = None
+        else:
+            self.base_map_origin_override = [float(origin_xy[0]), float(origin_xy[1])]
+        self._alignment_status_logged = False
+
+    def _effective_base_map_origin(self):
+        if self.base_map_origin_override is not None:
+            return self.base_map_origin_override
+        return self.base_map_origin
 
     def active_map_source(self):
         if self.prefer_base_map_for_planning and self.base_map_received:
@@ -84,18 +97,24 @@ class MapManager:
         if source == "slam":
             return self.map_width, self.map_height, self.map_resolution, self.map_origin
         if source == "base":
-            return self.base_map_width, self.base_map_height, self.base_map_resolution, self.base_map_origin
+            return (
+                self.base_map_width,
+                self.base_map_height,
+                self.base_map_resolution,
+                self._effective_base_map_origin(),
+            )
         return 0, 0, 0.05, [0.0, 0.0]
 
     def maps_aligned(self):
         if not (self.map_received and self.base_map_received):
             return False
+        base_origin = self._effective_base_map_origin()
         return (
             self.map_width == self.base_map_width
             and self.map_height == self.base_map_height
             and abs(self.map_resolution - self.base_map_resolution) < 1e-6
-            and abs(self.map_origin[0] - self.base_map_origin[0]) < 1e-6
-            and abs(self.map_origin[1] - self.base_map_origin[1]) < 1e-6
+            and abs(self.map_origin[0] - base_origin[0]) < 1e-6
+            and abs(self.map_origin[1] - base_origin[1]) < 1e-6
         )
 
     def world_to_grid(self, x, y):
@@ -116,7 +135,7 @@ class MapManager:
             width = self.base_map_width
             height = self.base_map_height
             resolution = self.base_map_resolution
-            origin = self.base_map_origin
+            origin = self._effective_base_map_origin()
             if width <= 0 or height <= 0:
                 return None
 
@@ -155,7 +174,7 @@ class MapManager:
 
         if source == "base":
             resolution = self.base_map_resolution
-            origin = self.base_map_origin
+            origin = self._effective_base_map_origin()
             wx = (gx * resolution) + origin[0] + (resolution / 2)
             wy = (gy * resolution) + origin[1] + (resolution / 2)
             return (wx, wy)

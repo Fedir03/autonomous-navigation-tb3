@@ -6,6 +6,7 @@ import termios
 import threading
 import time
 import tty
+from copy import deepcopy
 
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, TwistStamped
@@ -62,6 +63,7 @@ class PointAToBNode(Node):
         self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped, "/initialpose", 10)
         self.debug_marker_pub = self.create_publisher(MarkerArray, "/nav_debug_markers", 10)
         self.path_pub = self.create_publisher(Path, "/nav_planned_path", 10)
+        self.base_map_aligned_pub = self.create_publisher(OccupancyGrid, "/base_map_aligned", qos_map)
 
         self.create_subscription(Odometry, "/odom", self.pose_estimator.odom_callback, qos_best_effort)
         self.create_subscription(LaserScan, "/scan", self.local_planner.scan_callback, qos_best_effort)
@@ -77,6 +79,8 @@ class PointAToBNode(Node):
         self.pending_frame_alignment = None
         self.frame_alignment_done = False
         self.last_marker_publish_time = 0.0
+        self.latest_base_map_msg = None
+        self.base_map_origin_override_internal = None
 
         self.current_phase = "I"
         self.phase_entry_y = KEY_POINTS["DOOR"][1] + 0.20
@@ -130,7 +134,41 @@ class PointAToBNode(Node):
         self.map_manager.map_callback(msg, self.get_logger())
 
     def base_map_callback(self, msg: OccupancyGrid):
-        self.map_manager.base_map_callback(msg, self.get_logger())
+        self.latest_base_map_msg = msg
+        aligned = self._build_aligned_base_map_msg(msg)
+        self.base_map_aligned_pub.publish(aligned)
+        self.map_manager.base_map_callback(aligned, self.get_logger())
+
+    def _build_aligned_base_map_msg(self, msg: OccupancyGrid) -> OccupancyGrid:
+        aligned = deepcopy(msg)
+        if self.base_map_origin_override_internal is not None:
+            aligned.info.origin.position.x = self.base_map_origin_override_internal[0]
+            aligned.info.origin.position.y = self.base_map_origin_override_internal[1]
+        return aligned
+
+    def _update_base_map_alignment_from_initial_pose(self):
+        if not self.config.base_map_dynamic_alignment_enabled:
+            return
+        if not self.frame_alignment_done:
+            return
+
+        ref_init = self.config.base_map_reference_initial_external_xy
+        ref_origin = self.config.base_map_reference_origin_map_xy
+        # Convert the calibrated external anchor of base-map origin to current map frame.
+        anchor_external_x = ref_init[0] + ref_origin[0]
+        anchor_external_y = ref_init[1] + ref_origin[1]
+        ox, oy = self.coords.to_internal_xy(anchor_external_x, anchor_external_y)
+
+        self.base_map_origin_override_internal = [ox, oy]
+        self.map_manager.set_base_map_origin_override(self.base_map_origin_override_internal)
+        self.get_logger().info(
+            f"Applied dynamic base_map origin from initial pose: ({ox:.3f}, {oy:.3f})"
+        )
+
+        if self.latest_base_map_msg is not None:
+            aligned = self._build_aligned_base_map_msg(self.latest_base_map_msg)
+            self.base_map_aligned_pub.publish(aligned)
+            self.map_manager.base_map_callback(aligned, self.get_logger())
 
     def try_align_frames(self):
         if self.frame_alignment_done or self.pending_frame_alignment is None:
@@ -149,6 +187,7 @@ class PointAToBNode(Node):
             self.pose_estimator.current_yaw,
         )
         self.frame_alignment_done = True
+        self._update_base_map_alignment_from_initial_pose()
         self.get_logger().info("Coordinate frames aligned using TF map pose.")
         return True
 
