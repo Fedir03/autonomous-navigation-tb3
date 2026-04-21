@@ -96,6 +96,25 @@ class GlobalPlanner:
                         return (nx, ny)
         return None
 
+    def _try_slam_fallback(self, start_xy, end_xy, reason):
+        if self.map_manager.active_map_source() != "base" or (not self.map_manager.map_received):
+            self.last_error = reason
+            return []
+
+        prev_preference = self.map_manager.prefer_base_map_for_planning
+        self.map_manager.prefer_base_map_for_planning = False
+        try:
+            fallback_path = self.calculate_path(start_xy, end_xy)
+        finally:
+            self.map_manager.prefer_base_map_for_planning = prev_preference
+
+        if fallback_path:
+            self.last_error = ""
+            return fallback_path
+
+        self.last_error = reason + " (SLAM fallback also failed)"
+        return []
+
     def calculate_path(self, start_xy, end_xy):
         width, height, resolution, origin = self.map_manager.get_active_map_info()
         if width <= 0 or height <= 0:
@@ -105,8 +124,7 @@ class GlobalPlanner:
         start_grid = self.map_manager.world_to_grid(*start_xy)
         end_grid = self.map_manager.world_to_grid(*end_xy)
         if start_grid is None or end_grid is None:
-            self.last_error = "Invalid map or coordinates."
-            return []
+            return self._try_slam_fallback(start_xy, end_xy, "Invalid map or coordinates.")
 
         if (not self.map_manager.in_bounds(start_grid[0], start_grid[1])) or (
             not self.map_manager.in_bounds(end_grid[0], end_grid[1])
@@ -115,16 +133,16 @@ class GlobalPlanner:
             min_y = origin[1]
             max_x = origin[0] + width * resolution
             max_y = origin[1] + height * resolution
-            self.last_error = (
+            reason = (
                 f"Requested start/goal outside map bounds. "
                 f"Map x:[{min_x:.2f},{max_x:.2f}] y:[{min_y:.2f},{max_y:.2f}]"
             )
+            return self._try_slam_fallback(start_xy, end_xy, reason)
 
         start_grid = self.find_nearest_free_cell(*start_grid)
         end_grid = self.find_nearest_free_cell(*end_grid)
         if start_grid is None or end_grid is None:
-            self.last_error = "Could not find nearby free start/end cell."
-            return []
+            return self._try_slam_fallback(start_xy, end_xy, "Could not find nearby free start/end cell.")
 
         frontier = []
         heapq.heappush(frontier, (0.0, start_grid))
@@ -159,8 +177,7 @@ class GlobalPlanner:
                         came_from[neighbor] = current
 
         if not found:
-            self.last_error = "A* failed to find a path with current map(s)."
-            return []
+            return self._try_slam_fallback(start_xy, end_xy, "A* failed to find a path with current map(s).")
 
         path_grid = []
         curr = end_grid
