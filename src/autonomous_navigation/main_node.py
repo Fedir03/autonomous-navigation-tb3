@@ -1,4 +1,5 @@
 import math
+import os
 import select
 import sys
 import termios
@@ -77,9 +78,53 @@ class PointAToBNode(Node):
         self.frame_alignment_done = False
         self.last_marker_publish_time = 0.0
 
+        self.current_phase = "I"
+        self.phase_entry_y = KEY_POINTS["DOOR"][1] + 0.20
+        self.phase_exit_y = KEY_POINTS["DOOR"][1] - 0.20
+        self.last_runtime_log_time = 0.0
+        self.runtime_log_path = None
+        self.runtime_log_file = None
+        self._open_runtime_log_file()
+
         self.timer = self.create_timer(0.1, self.control_loop)
         threading.Thread(target=self.input_thread, daemon=True).start()
         threading.Thread(target=self.spacebar_status_thread, daemon=True).start()
+
+    def _open_runtime_log_file(self):
+        logs_dir = os.path.join(os.path.dirname(__file__), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        self.runtime_log_path = os.path.join(logs_dir, f"navigation_runtime_{stamp}.csv")
+        self.runtime_log_file = open(self.runtime_log_path, "w", encoding="utf-8", buffering=1)
+        self.runtime_log_file.write("timestamp,current_phase,robot_x,robot_y,robot_yaw\n")
+        self.get_logger().info(f"Runtime log enabled: {self.runtime_log_path}")
+
+    def close_runtime_log_file(self):
+        if self.runtime_log_file is not None:
+            self.runtime_log_file.close()
+            self.runtime_log_file = None
+
+    def _update_phase_from_external_y(self, ext_y):
+        if self.current_phase == "I" and ext_y >= self.phase_entry_y:
+            self.current_phase = "II"
+        elif self.current_phase == "II" and ext_y <= self.phase_exit_y:
+            self.current_phase = "I"
+
+    def write_runtime_log(self, now):
+        if self.runtime_log_file is None:
+            return
+        if (now - self.last_runtime_log_time) < 1.0:
+            return
+
+        ex, ey = self.coords.to_external_xy(self.pose_estimator.current_x, self.pose_estimator.current_y)
+        eyaw = self.coords.internal_yaw_to_external(self.pose_estimator.current_yaw)
+        self._update_phase_from_external_y(ey)
+
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        self.runtime_log_file.write(
+            f"{ts},{self.current_phase},{ex:.3f},{ey:.3f},{eyaw:.4f}\n"
+        )
+        self.last_runtime_log_time = now
 
     def map_callback(self, msg: OccupancyGrid):
         self.map_manager.map_callback(msg, self.get_logger())
@@ -398,6 +443,8 @@ class PointAToBNode(Node):
             return
 
         now = time.time()
+        self.write_runtime_log(now)
+
         pending_status_prints = self.consume_status_print_requests()
         for _ in range(pending_status_prints):
             self.telemetry.print_navigation_status(
@@ -437,6 +484,7 @@ def main(args=None):
     finally:
         stop = TwistStamped()
         node.publisher.publish(stop)
+        node.close_runtime_log_file()
         node.destroy_node()
         rclpy.shutdown()
 

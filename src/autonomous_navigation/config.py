@@ -177,3 +177,13 @@ class CoordinateAdapter:
 
         align_yaw = math.atan2(self.align_sin, self.align_cos)
         return normalize_angle(yaw_external + align_yaw)
+
+    def internal_yaw_to_external(self, yaw_internal: float) -> float:
+        align_yaw = math.atan2(self.align_sin, self.align_cos) if self.frame_aligned else 0.0
+        yaw_external = normalize_angle(yaw_internal - align_yaw)
+
+        # Keep yaw coherent with optional axis swap used by the coordinate adapter.
+        if self.swap_xy:
+            yaw_external = normalize_angle((math.pi / 2.0) - yaw_external)
+
+        return yaw_external
