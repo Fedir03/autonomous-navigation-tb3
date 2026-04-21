@@ -94,13 +94,23 @@ class RouteManager:
         self.door_waypoint = None
 
     def begin_door_transition_if_needed(self):
-        if (not self.door_transition_required) or self.door_transition_done or self.door_transition_active:
+        if (
+            (not self.door_transition_required)
+            or self.door_transition_done
+            or self.door_transition_active
+        ):
             return False
 
         if self.target is None or self.door_waypoint is None:
             return False
 
-        at_door_segment = math.hypot(self.target_x - self.door_waypoint[0], self.target_y - self.door_waypoint[1]) < 0.30
+        at_door_segment = (
+            math.hypot(
+                self.target_x - self.door_waypoint[0],
+                self.target_y - self.door_waypoint[1],
+            )
+            < 0.30
+        )
         if not at_door_segment:
             return False
 
@@ -151,7 +161,10 @@ class RouteManager:
             self.current_wp_index = self._nearest_waypoint_index(current_xy)
             self.is_moving = True
             self.replan_fail_streak = 0
-            self.best_distance_on_segment = math.hypot(self.target_x - current_xy[0], self.target_y - current_xy[1])
+            self.best_distance_on_segment = math.hypot(
+                self.target_x - current_xy[0],
+                self.target_y - current_xy[1],
+            )
             self.last_progress_time = now
             print("Path plotted with {} waypoints.".format(len(self.path)))
             return True
@@ -178,7 +191,10 @@ class RouteManager:
             self.current_wp_index = self._nearest_waypoint_index(current_xy)
             self.is_moving = True
             self.replan_fail_streak = 0
-            self.best_distance_on_segment = math.hypot(self.target_x - current_xy[0], self.target_y - current_xy[1])
+            self.best_distance_on_segment = math.hypot(
+                self.target_x - current_xy[0],
+                self.target_y - current_xy[1],
+            )
             self.last_progress_time = now
             self.logger.info("Replan success. Returning to FOLLOW_GOAL.")
             return True

@@ -71,7 +71,10 @@ class MapManager:
         if not self.base_map_received:
             if logger is not None:
                 logger.info(
-                    f"Base map received: {self.base_map_width}x{self.base_map_height} @ {self.base_map_resolution}m/px"
+                    (
+                        f"Base map received: {self.base_map_width}x{self.base_map_height} "
+                        f"@ {self.base_map_resolution}m/px"
+                    )
                 )
             self.base_map_received = True
         self._log_alignment_status(logger)
@@ -169,11 +172,20 @@ class MapManager:
         other_val = None
 
         if source == "base":
-            if self.base_map_received and 0 <= gx < self.base_map_width and 0 <= gy < self.base_map_height:
+            if (
+                self.base_map_received
+                and 0 <= gx < self.base_map_width
+                and 0 <= gy < self.base_map_height
+            ):
                 idx = gy * self.base_map_width + gx
                 active_val = self.base_map_data[idx]
 
-            if self.maps_aligned() and self.map_received and 0 <= gx < self.map_width and 0 <= gy < self.map_height:
+            if (
+                self.maps_aligned()
+                and self.map_received
+                and 0 <= gx < self.map_width
+                and 0 <= gy < self.map_height
+            ):
                 idx = gy * self.map_width + gx
                 other_val = self.map_data[idx]
 
@@ -182,7 +194,12 @@ class MapManager:
                 idx = gy * self.map_width + gx
                 active_val = self.map_data[idx]
 
-            if self.maps_aligned() and self.base_map_received and 0 <= gx < self.base_map_width and 0 <= gy < self.base_map_height:
+            if (
+                self.maps_aligned()
+                and self.base_map_received
+                and 0 <= gx < self.base_map_width
+                and 0 <= gy < self.base_map_height
+            ):
                 idx = gy * self.base_map_width + gx
                 other_val = self.base_map_data[idx]
 

@@ -3,7 +3,13 @@ import math
 
 
 class GlobalPlanner:
-    def __init__(self, map_manager, inflation_radius_m=0.22, nearest_free_search_radius_m=0.70, waypoint_spacing=0.30):
+    def __init__(
+        self,
+        map_manager,
+        inflation_radius_m=0.22,
+        nearest_free_search_radius_m=0.70,
+        waypoint_spacing=0.30,
+    ):
         self.map_manager = map_manager
         self.inflation_radius_m = inflation_radius_m
         self.nearest_free_search_radius_m = nearest_free_search_radius_m
@@ -158,7 +164,11 @@ class GlobalPlanner:
         start_grid = self.find_nearest_free_cell(*start_grid)
         end_grid = self.find_nearest_free_cell(*end_grid)
         if start_grid is None or end_grid is None:
-            return self._try_slam_fallback(start_xy, end_xy, "Could not find nearby free start/end cell.")
+            return self._try_slam_fallback(
+                start_xy,
+                end_xy,
+                "Could not find nearby free start/end cell.",
+            )
 
         frontier = []
         heapq.heappush(frontier, (0.0, start_grid))
@@ -188,12 +198,19 @@ class GlobalPlanner:
                     new_cost = cost_so_far[current] + step_cost
                     if neighbor not in cost_so_far or new_cost < cost_so_far[neighbor]:
                         cost_so_far[neighbor] = new_cost
-                        priority = new_cost + math.hypot(end_grid[0] - neighbor[0], end_grid[1] - neighbor[1])
+                        priority = new_cost + math.hypot(
+                            end_grid[0] - neighbor[0],
+                            end_grid[1] - neighbor[1],
+                        )
                         heapq.heappush(frontier, (priority, neighbor))
                         came_from[neighbor] = current
 
         if not found:
-            return self._try_slam_fallback(start_xy, end_xy, "A* failed to find a path with current map(s).")
+            return self._try_slam_fallback(
+                start_xy,
+                end_xy,
+                "A* failed to find a path with current map(s).",
+            )
 
         path_grid = []
         curr = end_grid

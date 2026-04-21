@@ -86,28 +86,65 @@ class Telemetry:
 
     def print_navigation_status(self, pose_estimator, local_planner, route_manager, label="STATUS"):
         active_goal = route_manager.target
-        final_goal = route_manager.final_target if route_manager.final_target is not None else active_goal
+        final_goal = (
+            route_manager.final_target
+            if route_manager.final_target is not None
+            else active_goal
+        )
 
         dist_active = None
         dist_final = None
         if active_goal is not None:
-            dist_active = math.hypot(active_goal[0] - pose_estimator.current_x, active_goal[1] - pose_estimator.current_y)
+            dist_active = math.hypot(
+                active_goal[0] - pose_estimator.current_x,
+                active_goal[1] - pose_estimator.current_y,
+            )
         if final_goal is not None:
-            dist_final = math.hypot(final_goal[0] - pose_estimator.current_x, final_goal[1] - pose_estimator.current_y)
+            dist_final = math.hypot(
+                final_goal[0] - pose_estimator.current_x,
+                final_goal[1] - pose_estimator.current_y,
+            )
 
-        ex, ey = self.coord_adapter.to_external_xy(pose_estimator.current_x, pose_estimator.current_y)
+        ex, ey = self.coord_adapter.to_external_xy(
+            pose_estimator.current_x,
+            pose_estimator.current_y,
+        )
 
         print("\n--- {} ---".format(label))
-        print("Pose estimada (externa): x={:.2f}, y={:.2f}, yaw={:.1f}deg".format(ex, ey, math.degrees(pose_estimator.current_yaw)))
-        print("Pose interna planner: x={:.2f}, y={:.2f}".format(pose_estimator.current_x, pose_estimator.current_y))
+        print(
+            "Pose estimada (externa): x={:.2f}, y={:.2f}, yaw={:.1f}deg".format(
+                ex,
+                ey,
+                math.degrees(pose_estimator.current_yaw),
+            )
+        )
+        print(
+            "Pose interna planner: x={:.2f}, y={:.2f}".format(
+                pose_estimator.current_x,
+                pose_estimator.current_y,
+            )
+        )
         print("Fuente de pose: {}".format(pose_estimator.pose_source))
-        print("Objetivo activo (externo): {}".format(self.coord_adapter.format_external_xy(active_goal)))
-        print("Objetivo final (externo): {}".format(self.coord_adapter.format_external_xy(final_goal)))
+        print(
+            "Objetivo activo (externo): {}".format(
+                self.coord_adapter.format_external_xy(active_goal)
+            )
+        )
+        print(
+            "Objetivo final (externo): {}".format(
+                self.coord_adapter.format_external_xy(final_goal)
+            )
+        )
         if dist_active is not None:
             print("Distancia al objetivo activo: {:.2f} m".format(dist_active))
         if dist_final is not None:
             print("Distancia al objetivo final: {:.2f} m".format(dist_final))
-        print("Waypoint actual: {}/{}".format(route_manager.current_wp_index, len(route_manager.path)))
+        print(
+            "Waypoint actual: {}/{}".format(
+                route_manager.current_wp_index,
+                len(route_manager.path),
+            )
+        )
         print(
             "LiDAR front/left/right: {:.2f}/{:.2f}/{:.2f} m".format(
                 local_planner.min_front_dist,

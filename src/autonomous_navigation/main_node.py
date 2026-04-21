@@ -163,7 +163,11 @@ class PointAToBNode(Node):
         tx, ty = target_external
         route_external = []
 
-        forced_by_name = target_name in self.config.door_forced_targets if target_name is not None else False
+        forced_by_name = (
+            target_name in self.config.door_forced_targets
+            if target_name is not None
+            else False
+        )
         needs_door = forced_by_name or (ty > self.config.door_required_y_threshold)
         door_external = KEY_POINTS["DOOR"]
 
@@ -182,11 +186,23 @@ class PointAToBNode(Node):
             route_internal.append(int_wp)
             compact_external.append(ext_wp)
 
-        is_door_target = (target_name == "DOOR") or (math.hypot(tx - door_external[0], ty - door_external[1]) < 0.30)
-        is_original_room_target = target_name in ("A", "B", "C", "D", "E") if target_name is not None else False
-        door_transition_required = needs_door and (not is_door_target) and (not is_original_room_target)
+        is_door_target = (target_name == "DOOR") or (
+            math.hypot(tx - door_external[0], ty - door_external[1]) < 0.30
+        )
+        is_original_room_target = (
+            target_name in ("A", "B", "C", "D", "E")
+            if target_name is not None
+            else False
+        )
+        door_transition_required = (
+            needs_door and (not is_door_target) and (not is_original_room_target)
+        )
 
-        door_internal = self.coords.to_internal_xy(door_external[0], door_external[1]) if needs_door else None
+        door_internal = (
+            self.coords.to_internal_xy(door_external[0], door_external[1])
+            if needs_door
+            else None
+        )
         return route_internal, compact_external, door_transition_required, door_internal
 
     def queue_status_print(self):
@@ -325,12 +341,23 @@ class PointAToBNode(Node):
             )
 
             wait_start = time.time()
-            while rclpy.ok() and not self.pose_estimator.odom_received and (time.time() - wait_start) < 5.0:
+            while (
+                rclpy.ok()
+                and not self.pose_estimator.odom_received
+                and (time.time() - wait_start) < 5.0
+            ):
                 time.sleep(0.1)
 
-            if self.pose_estimator.set_manual_anchor_from_initial_pose(init_x_internal, init_y_internal, yaw_rad):
+            if self.pose_estimator.set_manual_anchor_from_initial_pose(
+                init_x_internal,
+                init_y_internal,
+                yaw_rad,
+            ):
                 self.pose_estimator.update_pose_from_manual_anchor()
-                ex, ey = self.coords.to_external_xy(self.pose_estimator.current_x, self.pose_estimator.current_y)
+                ex, ey = self.coords.to_external_xy(
+                    self.pose_estimator.current_x,
+                    self.pose_estimator.current_y,
+                )
                 print(
                     "Manual anchor ready. Pose external: ({:.2f}, {:.2f}, {:.1f}deg)".format(
                         ex,
@@ -339,7 +366,10 @@ class PointAToBNode(Node):
                     )
                 )
             else:
-                print("Odometry not received yet. Using TF when available, otherwise initial pose temporary.")
+                print(
+                    "Odometry not received yet. Using TF when available, "
+                    "otherwise initial pose temporary."
+                )
 
         except ValueError:
             self.get_logger().error("Invalid initial pose input!")
@@ -384,7 +414,12 @@ class PointAToBNode(Node):
                     print("Cannot localize robot in map frame yet.")
                     continue
 
-                mandatory_internal, mandatory_external, door_transition_required, door_internal = self.build_mandatory_route(
+                (
+                    mandatory_internal,
+                    mandatory_external,
+                    door_transition_required,
+                    door_internal,
+                ) = self.build_mandatory_route(
                     final_external,
                     target_name,
                 )
@@ -399,7 +434,10 @@ class PointAToBNode(Node):
                 )
                 self.local_planner.reset_for_new_route()
 
-                route_steps = " -> ".join("({:.2f}, {:.2f})".format(p[0], p[1]) for p in mandatory_external)
+                route_steps = " -> ".join(
+                    "({:.2f}, {:.2f})".format(p[0], p[1])
+                    for p in mandatory_external
+                )
 
                 print(
                     "Route set (external): Start -> {}".format(

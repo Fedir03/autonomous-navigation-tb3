@@ -17,7 +17,9 @@ class LocalPlanner:
         self.min_right_dist = float("inf")
 
         # FSM state
-        self.nav_state = "FOLLOW_GOAL"  # FOLLOW_GOAL | AVOID_OBSTACLE | BACKUP | DOOR_ALIGN_ZERO | DOOR_SEARCH_LEFT | DOOR_ALIGN_NINETY | DOOR_CROSS
+        # FOLLOW_GOAL | AVOID_OBSTACLE | BACKUP |
+        # DOOR_ALIGN_ZERO | DOOR_SEARCH_LEFT | DOOR_ALIGN_NINETY | DOOR_CROSS
+        self.nav_state = "FOLLOW_GOAL"
         self.turn_away_sign = 1.0
 
         self.door_target_yaw_zero = 0.0
@@ -65,7 +67,10 @@ class LocalPlanner:
             move.twist.linear.x = 0.0
 
         # Avoid sweeping into nearby side obstacles while rotating.
-        if abs(move.twist.angular.z) > 0.2 and min(self.min_left_dist, self.min_right_dist) < self.config.turn_side_clearance:
+        if (
+            abs(move.twist.angular.z) > 0.2
+            and min(self.min_left_dist, self.min_right_dist) < self.config.turn_side_clearance
+        ):
             move.twist.linear.x = 0.0
             if self.min_left_dist < self.min_right_dist:
                 move.twist.angular.z = min(move.twist.angular.z, 0.0)
@@ -77,12 +82,22 @@ class LocalPlanner:
     def _start_door_transition(self, now, current_x, current_y):
         self.nav_state = "DOOR_ALIGN_ZERO"
         self.door_target_yaw_zero = self.coords.external_yaw_to_internal(0.0)
-        self.door_target_yaw_ninety = self.coords.external_yaw_to_internal(math.pi / 2.0)
+        self.door_target_yaw_ninety = self.coords.external_yaw_to_internal(
+            math.pi / 2.0
+        )
         self.door_search_start_time = now
         self.door_cross_start_xy = (current_x, current_y)
         self.door_left_opening_seen = False
 
-    def _step_door_transition(self, move, now, current_x, current_y, current_yaw, route_manager):
+    def _step_door_transition(
+        self,
+        move,
+        now,
+        current_x,
+        current_y,
+        current_yaw,
+        route_manager,
+    ):
         if self.nav_state == "DOOR_ALIGN_ZERO":
             yaw_err = normalize_angle(self.door_target_yaw_zero - current_yaw)
             move.twist.linear.x = 0.0
@@ -96,15 +111,23 @@ class LocalPlanner:
         if self.nav_state == "DOOR_SEARCH_LEFT":
             yaw_err = normalize_angle(self.door_target_yaw_zero - current_yaw)
             move.twist.linear.x = self.config.door_forward_speed
-            move.twist.angular.z = max(min(yaw_err * self.config.door_heading_kp, 0.6), -0.6)
+            move.twist.angular.z = max(
+                min(yaw_err * self.config.door_heading_kp, 0.6),
+                -0.6,
+            )
 
             if (now - self.door_search_start_time) >= self.config.door_search_min_time:
                 if self.min_left_dist > self.config.door_left_opening_distance:
                     self.door_left_opening_seen = True
 
             ext_x, _ = self.coords.to_external_xy(current_x, current_y)
-            center_reached = abs(ext_x - self.config.door_left_center_x) <= self.config.door_left_center_x_tolerance
-            center_passed = ext_x > (self.config.door_left_center_x + self.config.door_left_center_x_tolerance)
+            center_reached = (
+                abs(ext_x - self.config.door_left_center_x)
+                <= self.config.door_left_center_x_tolerance
+            )
+            center_passed = ext_x > (
+                self.config.door_left_center_x + self.config.door_left_center_x_tolerance
+            )
             if self.door_left_opening_seen and (center_reached or center_passed):
                 self.nav_state = "DOOR_ALIGN_NINETY"
             return move
@@ -112,7 +135,10 @@ class LocalPlanner:
         if self.nav_state == "DOOR_ALIGN_NINETY":
             yaw_err = normalize_angle(self.door_target_yaw_ninety - current_yaw)
             move.twist.linear.x = 0.0
-            move.twist.angular.z = max(min(yaw_err * self.config.kp_angular, 0.9), -0.9)
+            move.twist.angular.z = max(
+                min(yaw_err * self.config.kp_angular, 0.9),
+                -0.9,
+            )
             if abs(yaw_err) <= self.config.door_align_tolerance:
                 self.nav_state = "DOOR_CROSS"
                 self.door_cross_start_xy = (current_x, current_y)
@@ -154,7 +180,10 @@ class LocalPlanner:
             self.nav_state = "AVOID_OBSTACLE"
 
         if self.nav_state in ["DOOR_ALIGN_ZERO", "DOOR_SEARCH_LEFT", "DOOR_ALIGN_NINETY", "DOOR_CROSS"]:
-            if self.min_front_dist < self.config.safe_stop_distance and self.nav_state != "DOOR_ALIGN_NINETY":
+            if (
+                self.min_front_dist < self.config.safe_stop_distance
+                and self.nav_state != "DOOR_ALIGN_NINETY"
+            ):
                 move.twist.linear.x = 0.0
                 move.twist.angular.z = 0.0
                 return self._apply_safety_clamps(move)
@@ -164,7 +193,10 @@ class LocalPlanner:
 
         # If there is no active path, retry pending segments.
         if (not route_manager.is_moving) or (not route_manager.path):
-            if route_manager.pending_segment_target is not None and now >= route_manager.next_segment_retry_time:
+            if (
+                route_manager.pending_segment_target is not None
+                and now >= route_manager.next_segment_retry_time
+            ):
                 route_manager.start_next_segment((current_x, current_y), now)
 
             if not route_manager.path:
@@ -176,14 +208,19 @@ class LocalPlanner:
 
         if self.nav_state == "AVOID_OBSTACLE":
             self._handle_avoid_obstacle(move)
-            if route_manager.try_replan_current_segment((current_x, current_y), now) and self.min_front_dist > self.config.caution_distance:
+            if (
+                route_manager.try_replan_current_segment((current_x, current_y), now)
+                and self.min_front_dist > self.config.caution_distance
+            ):
                 self.nav_state = "FOLLOW_GOAL"
             return self._apply_safety_clamps(move)
 
         # FOLLOW_GOAL + simple obstacle handling
         if self.min_front_dist < self.config.follow_block_trigger_distance:
             if not route_manager.try_replan_current_segment((current_x, current_y), now):
-                self.turn_away_sign = 1.0 if self.min_left_dist > self.min_right_dist else -1.0
+                self.turn_away_sign = (
+                    1.0 if self.min_left_dist > self.min_right_dist else -1.0
+                )
                 self.nav_state = "AVOID_OBSTACLE"
             return self._apply_safety_clamps(move)
 
@@ -227,7 +264,11 @@ class LocalPlanner:
             move.twist.linear.x = 0.0
             move.twist.angular.z = max(min(yaw_err * self.config.kp_angular, 1.0), -1.0)
         else:
-            max_allowed = self.config.max_speed if self.min_front_dist > self.config.caution_distance else self.config.wall_follow_speed
+            max_allowed = (
+                self.config.max_speed
+                if self.min_front_dist > self.config.caution_distance
+                else self.config.wall_follow_speed
+            )
             ang_ratio = min(abs(yaw_err) / max(self.config.yaw_stop_threshold, 1e-6), 1.0)
             speed_scale = 1.0 - (0.75 * ang_ratio)
             lin_cmd = min(dist * self.config.kp_linear, max_allowed) * speed_scale
