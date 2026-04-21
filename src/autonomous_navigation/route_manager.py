@@ -154,9 +154,16 @@ class RouteManager:
         self.path = self.planner.calculate_path(current_xy, target)
 
         if self.path:
-            if self.global_waypoints and self.global_waypoints[0] == self.pending_segment_target:
-                self.global_waypoints.pop(0)
-            self.pending_segment_target = None
+            reaches_goal = getattr(self.planner, "last_plan_reaches_goal", True)
+            if reaches_goal:
+                if self.global_waypoints and self.global_waypoints[0] == self.pending_segment_target:
+                    self.global_waypoints.pop(0)
+                self.pending_segment_target = None
+            else:
+                self.logger.info(
+                    "Generated approach path toward out-of-bounds target; keeping segment pending for replanning."
+                )
+
             self.next_segment_retry_time = 0.0
             self.current_wp_index = self._nearest_waypoint_index(current_xy)
             self.is_moving = True
@@ -166,6 +173,18 @@ class RouteManager:
                 self.target_y - current_xy[1],
             )
             self.last_progress_time = now
+
+            # If this is a partial approach plan and the robot is already at its end,
+            # wait and retry instead of spinning start_next_segment in a tight loop.
+            if not reaches_goal and len(self.path) <= 1:
+                end_wp = self.path[-1]
+                if math.hypot(end_wp[0] - current_xy[0], end_wp[1] - current_xy[1]) < self.config.xy_tolerance:
+                    self.path = []
+                    self.is_moving = False
+                    self.next_segment_retry_time = now + 1.0
+                    print("Target still outside mapped area. Holding and retrying in 1s...")
+                    return False
+
             print("Path plotted with {} waypoints.".format(len(self.path)))
             return True
 

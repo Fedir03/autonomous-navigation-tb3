@@ -21,6 +21,7 @@ class GlobalPlanner:
         self.directness_bias = directness_bias
         self.waypoint_spacing = waypoint_spacing
         self.last_error = ""
+        self.last_plan_reaches_goal = True
 
     def _inflation_radius_cells(self):
         _, _, resolution, _ = self.map_manager.get_active_map_info()
@@ -166,6 +167,8 @@ class GlobalPlanner:
         return []
 
     def calculate_path(self, start_xy, end_xy):
+        self.last_plan_reaches_goal = True
+
         width, height, resolution, origin = self.map_manager.get_active_map_info()
         if width <= 0 or height <= 0:
             self.last_error = "No map/base_map received yet."
@@ -176,18 +179,40 @@ class GlobalPlanner:
         if start_grid is None or end_grid is None:
             return self._try_slam_fallback(start_xy, end_xy, "Invalid map or coordinates.")
 
-        if (not self.map_manager.in_bounds(start_grid[0], start_grid[1])) or (
-            not self.map_manager.in_bounds(end_grid[0], end_grid[1])
-        ):
+        start_oob = not self.map_manager.in_bounds(start_grid[0], start_grid[1])
+        goal_oob = not self.map_manager.in_bounds(end_grid[0], end_grid[1])
+
+        if start_oob or goal_oob:
             min_x = origin[0]
             min_y = origin[1]
             max_x = origin[0] + width * resolution
             max_y = origin[1] + height * resolution
-            reason = (
+            outside_reason = (
                 f"Requested start/goal outside map bounds. "
                 f"Map x:[{min_x:.2f},{max_x:.2f}] y:[{min_y:.2f},{max_y:.2f}]"
             )
-            return self._try_slam_fallback(start_xy, end_xy, reason)
+
+            # If currently planning on base_map, first try SLAM fallback where bounds
+            # may already include the requested target.
+            if self.map_manager.active_map_source() == "base" and self.map_manager.map_received:
+                prev_preference = self.map_manager.prefer_base_map_for_planning
+                self.map_manager.prefer_base_map_for_planning = False
+                try:
+                    fallback_path = self.calculate_path(start_xy, end_xy)
+                finally:
+                    self.map_manager.prefer_base_map_for_planning = prev_preference
+
+                if fallback_path:
+                    return fallback_path
+
+            # Approach behavior: clamp outside start/goal into current map so the
+            # robot can move closer and replan as mapping expands.
+            start_grid = self.map_manager.clamp_to_map(start_grid[0], start_grid[1])
+            end_grid = self.map_manager.clamp_to_map(end_grid[0], end_grid[1])
+            self.last_plan_reaches_goal = not goal_oob
+
+            if goal_oob:
+                self.last_error = outside_reason + " (planning approach path to map boundary)"
 
         start_grid = self.find_nearest_free_cell(*start_grid)
         end_grid = self.find_nearest_free_cell(*end_grid)
