@@ -7,11 +7,12 @@ import time
 import tty
 
 import rclpy
-from geometry_msgs.msg import PoseWithCovarianceStamped, TwistStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped, TwistStamped
 from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
+from tf2_ros import TransformBroadcaster
 from visualization_msgs.msg import MarkerArray
 
 from .config import CoordinateAdapter, KEY_POINTS, NavigationConfig
@@ -77,7 +78,11 @@ class PointAToBNode(Node):
         self.frame_alignment_done = False
         self.last_marker_publish_time = 0.0
 
+        self.base_map_external_frame_id = self.config.base_map_external_frame_id
+        self.tf_broadcaster = TransformBroadcaster(self)
+
         self.timer = self.create_timer(0.1, self.control_loop)
+        self.base_map_tf_timer = self.create_timer(0.1, self.publish_base_map_external_tf)
         threading.Thread(target=self.input_thread, daemon=True).start()
         threading.Thread(target=self.spacebar_status_thread, daemon=True).start()
 
@@ -86,6 +91,29 @@ class PointAToBNode(Node):
 
     def base_map_callback(self, msg: OccupancyGrid):
         self.map_manager.base_map_callback(msg, self.get_logger())
+
+    def publish_base_map_external_tf(self):
+        if not self.config.publish_base_map_external_tf:
+            return
+        if not self.config.base_map_in_external_frame:
+            return
+
+        ex0, ey0 = self.coords.to_external_xy(0.0, 0.0)
+        ex1, ey1 = self.coords.to_external_xy(1.0, 0.0)
+        yaw = math.atan2(ey1 - ey0, ex1 - ex0)
+
+        tf_msg = TransformStamped()
+        tf_msg.header.stamp = self.get_clock().now().to_msg()
+        tf_msg.header.frame_id = "map"
+        tf_msg.child_frame_id = self.base_map_external_frame_id
+        tf_msg.transform.translation.x = float(ex0)
+        tf_msg.transform.translation.y = float(ey0)
+        tf_msg.transform.translation.z = 0.0
+        tf_msg.transform.rotation.x = 0.0
+        tf_msg.transform.rotation.y = 0.0
+        tf_msg.transform.rotation.z = math.sin(yaw / 2.0)
+        tf_msg.transform.rotation.w = math.cos(yaw / 2.0)
+        self.tf_broadcaster.sendTransform(tf_msg)
 
     def try_align_frames(self):
         if self.frame_alignment_done or self.pending_frame_alignment is None:

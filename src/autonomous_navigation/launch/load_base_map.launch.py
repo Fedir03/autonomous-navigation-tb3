@@ -25,6 +25,11 @@ def generate_launch_description():
         default_value="true",
         description="Automatically configure and activate map server lifecycle node",
     )
+    frame_id_arg = DeclareLaunchArgument(
+        "frame_id",
+        default_value="base_map_ext",
+        description="Frame id used by map_server for /base_map",
+    )
 
     map_server = Node(
         package="nav2_map_server",
@@ -36,7 +41,7 @@ def generate_launch_description():
                 "use_sim_time": LaunchConfiguration("use_sim_time"),
                 "yaml_filename": LaunchConfiguration("map_yaml"),
                 "topic_name": "/base_map",
-                "frame_id": "map",
+                "frame_id": LaunchConfiguration("frame_id"),
             }
         ],
     )
@@ -59,6 +64,7 @@ def generate_launch_description():
         map_yaml_arg,
         use_sim_time_arg,
         autostart_arg,
+        frame_id_arg,
         map_server,
         lifecycle_manager,
     ])

@@ -25,6 +25,8 @@ class NavigationConfig:
     # If True, /base_map is interpreted in external/professor coordinates and
     # transformed to SLAM map coordinates using the initial-pose alignment.
     base_map_in_external_frame: bool = True
+    base_map_external_frame_id: str = "base_map_ext"
+    publish_base_map_external_tf: bool = True
 
     inflation_radius: int = 4
 

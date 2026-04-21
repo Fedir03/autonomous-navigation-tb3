@@ -12,6 +12,11 @@ Run:
 4. source install/setup.bash
 5. ros2 launch autonomous_navigation load_base_map.launch.py
 
+Frame notes:
+1. /base_map is published in frame base_map_ext by default.
+2. autonomous_navigation publishes a runtime TF map -> base_map_ext from the entered initial pose.
+3. This allows changing initial pose without re-editing map origin/yaw for each run.
+
 RViz calibration quick loop:
 1. Add Map display for /base_map and another for /map.
 2. Set alpha around 0.5 and compare wall overlap.
