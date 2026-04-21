@@ -1,7 +1,6 @@
 image: base_map.pgm
 mode: trinary
-# Base map is expressed in external/professor frame.
-# Runtime alignment to SLAM map frame is applied from the entered initial pose.
+# Base map is consumed directly in the map frame.
 resolution: 0.01
 origin: [0.0, 0.0, 0.0]
 negate: 0

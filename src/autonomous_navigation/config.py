@@ -21,23 +21,18 @@ KEY_POINTS: Dict[str, Tuple[float, float]] = {
 @dataclass
 class NavigationConfig:
     swap_xy: bool = False
-    prefer_base_map_for_planning: bool = True
-    # If True, /base_map is interpreted in external/professor coordinates and
-    # transformed to SLAM map coordinates using the initial-pose alignment.
-    base_map_in_external_frame: bool = True
-    base_map_external_frame_id: str = "base_map_ext"
-    publish_base_map_external_tf: bool = True
+    prefer_base_map_for_planning: bool = False
 
     inflation_radius: int = 4
 
-    max_speed: float = 0.2
+    max_speed: float = 0.18
     kp_linear: float = 0.5
     kp_angular: float = 1.0
     xy_tolerance: float = 0.15
     yaw_tolerance: float = 0.1
-    yaw_stop_threshold: float = 0.65
-    follow_lookahead_distance: float = 0.45
-    min_motion_linear_speed: float = 0.06
+    yaw_stop_threshold: float = 0.50
+    follow_lookahead_distance: float = 0.30
+    min_motion_linear_speed: float = 0.04
 
     path_min_waypoint_spacing: float = 0.30
 
@@ -65,17 +60,16 @@ class NavigationConfig:
     # Door-first routing rule for upper room objectives.
     door_required_y_threshold: float = 8.5
     door_forced_targets: Tuple[str, ...] = ("Q", "R", "S", "T", "BASE")
-    door_progress_min_delta_y: float = 0.2
 
-    # Lidar-guided maneuver after crossing DOOR:
-    # 1) advance forward, 2) detect opening on the left, 3) turn left 90deg, 4) cross second door.
-    door_follow_speed: float = 0.10
-    door_heading_kp: float = 1.6
-    door_turn_speed: float = 0.7
+    # Door transition behavior (user/external frame references).
+    door_align_tolerance: float = 0.10
+    door_heading_kp: float = 1.4
+    door_forward_speed: float = 0.08
     door_left_opening_distance: float = 1.2
-    door_min_forward_time_before_left_check: float = 0.8
-    door_cross_x_distance: float = 0.9
-    door_turn_tolerance: float = 0.12
+    door_search_min_time: float = 0.7
+    door_left_center_x: float = 7.30
+    door_left_center_x_tolerance: float = 0.18
+    door_second_cross_distance: float = 0.90
 
     status_print_period: float = 1.0
     marker_publish_period: float = 0.5
@@ -172,3 +166,10 @@ class CoordinateAdapter:
             return None
         ex, ey = self.to_external_xy(xy[0], xy[1])
         return (round(ex, 2), round(ey, 2))
+
+    def external_yaw_to_internal(self, yaw_external: float) -> float:
+        if not self.frame_aligned:
+            return normalize_angle(yaw_external)
+
+        align_yaw = math.atan2(self.align_sin, self.align_cos)
+        return normalize_angle(yaw_external + align_yaw)

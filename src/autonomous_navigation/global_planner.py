@@ -186,7 +186,7 @@ class GlobalPlanner:
             curr = came_from[curr]
         path_grid.reverse()
 
-        simplified_grid = self._simplify_grid_path(path_grid)
+        simplified_grid = path_grid
 
         world_path = []
         for cell in simplified_grid:

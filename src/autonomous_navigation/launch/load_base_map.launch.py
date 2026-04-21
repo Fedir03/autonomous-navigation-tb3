@@ -27,7 +27,7 @@ def generate_launch_description():
     )
     frame_id_arg = DeclareLaunchArgument(
         "frame_id",
-        default_value="base_map_ext",
+        default_value="map",
         description="Frame id used by map_server for /base_map",
     )
 
