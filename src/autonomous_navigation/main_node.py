@@ -250,51 +250,75 @@ class PointAToBNode(Node):
 
         return objectives
 
-    def build_mandatory_route(self, target_external, target_name=None):
-        tx, ty = target_external
+    def _append_external_waypoint(self, route_external, ext_wp):
+        int_wp = self.coords.to_internal_xy(ext_wp[0], ext_wp[1])
+        if route_external:
+            prev = route_external[-1]
+            prev_int = self.coords.to_internal_xy(prev[0], prev[1])
+            if math.hypot(int_wp[0] - prev_int[0], int_wp[1] - prev_int[1]) < 0.05:
+                return
+        route_external.append(ext_wp)
+
+    def build_mandatory_route(self, objectives, current_external_xy):
+        if not objectives:
+            return [], [], False, None
+
+        door_external = KEY_POINTS["DOOR"]
+        current_ext_y = current_external_xy[1]
+
+        # "Already through DOOR" means robot is in upper area.
+        door_passed = current_ext_y > self.config.door_required_y_threshold
         route_external = []
 
-        forced_by_name = (
-            target_name in self.config.door_forced_targets
-            if target_name is not None
-            else False
-        )
-        needs_door = forced_by_name or (ty > self.config.door_required_y_threshold)
-        door_external = KEY_POINTS["DOOR"]
+        for objective in objectives:
+            ext_wp = objective["external"]
+            obj_name = objective["name"]
 
-        if needs_door:
-            route_external.append(door_external)
+            is_door_obj = (obj_name == "DOOR") or (
+                math.hypot(ext_wp[0] - door_external[0], ext_wp[1] - door_external[1]) < 0.30
+            )
+            forced_by_name = (
+                obj_name in self.config.door_forced_targets
+                if obj_name is not None
+                else False
+            )
+            forced_by_coordinate = ext_wp[1] > self.config.door_required_y_threshold
 
-        route_external.append((tx, ty))
+            needs_door_first = (not door_passed) and (not is_door_obj) and (
+                forced_by_name or forced_by_coordinate
+            )
 
-        route_internal = []
-        compact_external = []
-        for ext_wp in route_external:
-            int_wp = self.coords.to_internal_xy(ext_wp[0], ext_wp[1])
-            if route_internal:
-                if math.hypot(int_wp[0] - route_internal[-1][0], int_wp[1] - route_internal[-1][1]) < 0.05:
-                    continue
-            route_internal.append(int_wp)
-            compact_external.append(ext_wp)
+            if needs_door_first:
+                self._append_external_waypoint(route_external, door_external)
+                door_passed = True
 
-        is_door_target = (target_name == "DOOR") or (
-            math.hypot(tx - door_external[0], ty - door_external[1]) < 0.30
-        )
-        is_original_room_target = (
-            target_name in ("A", "B", "C", "D", "E")
-            if target_name is not None
-            else False
-        )
+            self._append_external_waypoint(route_external, ext_wp)
+
+            if is_door_obj:
+                door_passed = True
+
+        mandatory_internal = [
+            self.coords.to_internal_xy(p[0], p[1])
+            for p in route_external
+        ]
+
+        door_in_route_index = None
+        for idx, ext_wp in enumerate(route_external):
+            if math.hypot(ext_wp[0] - door_external[0], ext_wp[1] - door_external[1]) < 0.30:
+                door_in_route_index = idx
+                break
+
         door_transition_required = (
-            needs_door and (not is_door_target) and (not is_original_room_target)
+            door_in_route_index is not None
+            and door_in_route_index < (len(route_external) - 1)
         )
-
         door_internal = (
             self.coords.to_internal_xy(door_external[0], door_external[1])
-            if needs_door
+            if door_transition_required
             else None
         )
-        return route_internal, compact_external, door_transition_required, door_internal
+
+        return mandatory_internal, route_external, door_transition_required, door_internal
 
     def queue_status_print(self):
         with self.status_lock:
@@ -492,62 +516,30 @@ class PointAToBNode(Node):
                     print("Invalid input.")
                     continue
 
-                final_external = objectives[-1]["external"]
-                target_name = objectives[-1]["name"]
-                final_pos = self.coords.to_internal_xy(final_external[0], final_external[1])
-
                 if not (self.pose_estimator.get_robot_pose() or self.pose_estimator.initial_pose_received):
                     print("Cannot localize robot in map frame yet.")
                     continue
 
-                if len(objectives) == 1:
-                    (
-                        mandatory_internal,
-                        mandatory_external,
-                        door_transition_required,
-                        door_internal,
-                    ) = self.build_mandatory_route(
-                        final_external,
-                        target_name,
-                    )
-                else:
-                    mandatory_internal = []
-                    mandatory_external = []
-                    for objective in objectives:
-                        ext_wp = objective["external"]
-                        int_wp = self.coords.to_internal_xy(ext_wp[0], ext_wp[1])
-                        if mandatory_internal:
-                            if math.hypot(
-                                int_wp[0] - mandatory_internal[-1][0],
-                                int_wp[1] - mandatory_internal[-1][1],
-                            ) < 0.05:
-                                continue
-                        mandatory_internal.append(int_wp)
-                        mandatory_external.append(ext_wp)
+                current_external_xy = self.coords.to_external_xy(
+                    self.pose_estimator.current_x,
+                    self.pose_estimator.current_y,
+                )
+                (
+                    mandatory_internal,
+                    mandatory_external,
+                    door_transition_required,
+                    door_internal,
+                ) = self.build_mandatory_route(
+                    objectives,
+                    current_external_xy,
+                )
 
-                    if not mandatory_internal:
-                        print("Invalid input.")
-                        continue
+                if not mandatory_internal:
+                    print("Invalid input.")
+                    continue
 
-                    door_external = KEY_POINTS["DOOR"]
-                    door_in_route_index = None
-                    for idx, ext_wp in enumerate(mandatory_external):
-                        if math.hypot(
-                            ext_wp[0] - door_external[0],
-                            ext_wp[1] - door_external[1],
-                        ) < 0.30:
-                            door_in_route_index = idx
-                            break
-
-                    door_transition_required = (
-                        door_in_route_index is not None
-                        and door_in_route_index < (len(mandatory_external) - 1)
-                    )
-                    door_internal = (
-                        self.coords.to_internal_xy(door_external[0], door_external[1])
-                        if door_transition_required
-                        else None
-                    )
+                final_external = objectives[-1]["external"]
+                final_pos = self.coords.to_internal_xy(final_external[0], final_external[1])
 
                 now = time.time()
                 self.route_manager.set_route(
