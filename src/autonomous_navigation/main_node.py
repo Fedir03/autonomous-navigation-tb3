@@ -44,6 +44,11 @@ class PointAToBNode(Node):
             self.config.treat_unknown_as_free,
             self.config.planner_heuristic_weight,
             self.config.planner_directness_bias,
+            self.config.planner_unknown_cell_penalty,
+            self.config.planner_turn_penalty,
+            self.config.planner_reverse_progress_penalty,
+            self.config.planner_straight_path_shortcut,
+            self.config.planner_simplify_path,
             self.config.path_min_waypoint_spacing,
         )
         self.route_manager = RouteManager(self.global_planner, self.config, self.get_logger())

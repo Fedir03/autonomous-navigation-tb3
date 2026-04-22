@@ -33,13 +33,14 @@ class NavigationConfig:
     base_map_reference_origin_map_xy: Tuple[float, float] = (-1.590, -4.627)
 
     # Global planner obstacle inflation in meters (resolution-independent).
-    inflation_radius_m: float = 0.14
-    nearest_free_search_radius_m: float = 0.70
+    inflation_radius_m: float = 0.10
+    nearest_free_search_radius_m: float = 0.45
     treat_unknown_as_free: bool = True
     planner_heuristic_weight: float = 1.00
-    planner_directness_bias: float = 0.28
-    planner_unknown_cell_penalty: float = 0.30
-    planner_turn_penalty: float = 0.10
+    planner_directness_bias: float = 0.45
+    planner_unknown_cell_penalty: float = 2.20
+    planner_turn_penalty: float = 0.20
+    planner_reverse_progress_penalty: float = 0.80
     planner_straight_path_shortcut: bool = True
     planner_simplify_path: bool = True
 

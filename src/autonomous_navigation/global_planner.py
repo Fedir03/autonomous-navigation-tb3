@@ -11,6 +11,11 @@ class GlobalPlanner:
         treat_unknown_as_free=True,
         heuristic_weight=1.02,
         directness_bias=0.08,
+        unknown_cell_penalty=0.0,
+        turn_penalty=0.0,
+        reverse_progress_penalty=0.0,
+        straight_path_shortcut=True,
+        simplify_path=True,
         waypoint_spacing=0.30,
     ):
         self.map_manager = map_manager
@@ -19,6 +24,11 @@ class GlobalPlanner:
         self.treat_unknown_as_free = treat_unknown_as_free
         self.heuristic_weight = heuristic_weight
         self.directness_bias = directness_bias
+        self.unknown_cell_penalty = unknown_cell_penalty
+        self.turn_penalty = turn_penalty
+        self.reverse_progress_penalty = reverse_progress_penalty
+        self.straight_path_shortcut = straight_path_shortcut
+        self.simplify_path = simplify_path
         self.waypoint_spacing = waypoint_spacing
         self.last_error = ""
         self.last_plan_reaches_goal = True
@@ -64,6 +74,11 @@ class GlobalPlanner:
                 return False
         return True
 
+    def _is_unknown_cell(self, gx, gy):
+        if not self.map_manager.in_bounds(gx, gy):
+            return False
+        return self.map_manager.get_cell_occupancy(gx, gy) < 0
+
     def _point_line_distance_cells(self, p, a, b):
         ax, ay = a
         bx, by = b
@@ -101,7 +116,9 @@ class GlobalPlanner:
             return False
 
         occ = self.map_manager.get_cell_occupancy(gx, gy)
-        if occ < 0 and self.treat_unknown_as_free:
+        if occ < 0:
+            if not self.treat_unknown_as_free:
+                return False
             occ = 0
         if occ > 50:
             return False
@@ -112,11 +129,35 @@ class GlobalPlanner:
                 nx, ny = gx + dx, gy + dy
                 if self.map_manager.in_bounds(nx, ny):
                     n_occ = self.map_manager.get_cell_occupancy(nx, ny)
-                    if n_occ < 0 and self.treat_unknown_as_free:
+                    if n_occ < 0:
+                        if not self.treat_unknown_as_free:
+                            return False
                         n_occ = 0
                     if n_occ > 50:
                         return False
         return True
+
+    def _extra_transition_cost(self, current, neighbor, end_grid, came_from):
+        extra = 0.0
+
+        if self.unknown_cell_penalty > 0.0 and self._is_unknown_cell(neighbor[0], neighbor[1]):
+            extra += self.unknown_cell_penalty
+
+        if self.turn_penalty > 0.0:
+            prev = came_from.get(current)
+            if prev is not None:
+                vin = (current[0] - prev[0], current[1] - prev[1])
+                vout = (neighbor[0] - current[0], neighbor[1] - current[1])
+                if vin != vout:
+                    extra += self.turn_penalty
+
+        if self.reverse_progress_penalty > 0.0:
+            current_h = math.hypot(end_grid[0] - current[0], end_grid[1] - current[1])
+            next_h = math.hypot(end_grid[0] - neighbor[0], end_grid[1] - neighbor[1])
+            if next_h > (current_h + 1e-6):
+                extra += self.reverse_progress_penalty * (next_h - current_h)
+
+        return extra
 
     def find_nearest_free_cell(self, gx, gy, max_radius=None):
         width, height, _, _ = self.map_manager.get_active_map_info()
@@ -223,66 +264,70 @@ class GlobalPlanner:
                 "Could not find nearby free start/end cell.",
             )
 
-        frontier = []
-        heapq.heappush(frontier, (0.0, start_grid))
-        came_from = {start_grid: None}
-        cost_so_far = {start_grid: 0.0}
-        found = False
+        if self.straight_path_shortcut and self._segment_is_free(start_grid, end_grid):
+            path_grid = list(self._bresenham_cells(start_grid, end_grid))[1:]
+        else:
+            frontier = []
+            heapq.heappush(frontier, (0.0, start_grid))
+            came_from = {start_grid: None}
+            cost_so_far = {start_grid: 0.0}
+            found = False
 
-        while frontier:
-            current = heapq.heappop(frontier)[1]
-            if current == end_grid:
-                found = True
-                break
+            while frontier:
+                current = heapq.heappop(frontier)[1]
+                if current == end_grid:
+                    found = True
+                    break
 
-            for dx, dy in [
-                (0, 1),
-                (0, -1),
-                (1, 0),
-                (-1, 0),
-                (1, 1),
-                (1, -1),
-                (-1, 1),
-                (-1, -1),
-            ]:
-                neighbor = (current[0] + dx, current[1] + dy)
-                if self.map_manager.in_bounds(neighbor[0], neighbor[1]) and self.is_cell_free(*neighbor):
-                    step_cost = 1.414 if dx != 0 and dy != 0 else 1.0
-                    new_cost = cost_so_far[current] + step_cost
-                    if neighbor not in cost_so_far or new_cost < cost_so_far[neighbor]:
-                        cost_so_far[neighbor] = new_cost
-                        goal_h = math.hypot(
-                            end_grid[0] - neighbor[0],
-                            end_grid[1] - neighbor[1],
-                        )
-                        line_dev = self._point_line_distance_cells(
-                            neighbor,
-                            start_grid,
-                            end_grid,
-                        )
-                        priority = (
-                            new_cost
-                            + (self.heuristic_weight * goal_h)
-                            + (self.directness_bias * line_dev)
-                        )
-                        heapq.heappush(frontier, (priority, neighbor))
-                        came_from[neighbor] = current
+                for dx, dy in [
+                    (0, 1),
+                    (0, -1),
+                    (1, 0),
+                    (-1, 0),
+                    (1, 1),
+                    (1, -1),
+                    (-1, 1),
+                    (-1, -1),
+                ]:
+                    neighbor = (current[0] + dx, current[1] + dy)
+                    if self.map_manager.in_bounds(neighbor[0], neighbor[1]) and self.is_cell_free(*neighbor):
+                        step_cost = 1.414 if dx != 0 and dy != 0 else 1.0
+                        extra_cost = self._extra_transition_cost(current, neighbor, end_grid, came_from)
+                        new_cost = cost_so_far[current] + step_cost + extra_cost
+                        if neighbor not in cost_so_far or new_cost < cost_so_far[neighbor]:
+                            cost_so_far[neighbor] = new_cost
+                            goal_h = math.hypot(
+                                end_grid[0] - neighbor[0],
+                                end_grid[1] - neighbor[1],
+                            )
+                            line_dev = self._point_line_distance_cells(
+                                neighbor,
+                                start_grid,
+                                end_grid,
+                            )
+                            priority = (
+                                new_cost
+                                + (self.heuristic_weight * goal_h)
+                                + (self.directness_bias * line_dev)
+                            )
+                            heapq.heappush(frontier, (priority, neighbor))
+                            came_from[neighbor] = current
 
-        if not found:
-            return self._try_slam_fallback(
-                start_xy,
-                end_xy,
-                "A* failed to find a path with current map(s).",
-            )
+            if not found:
+                return self._try_slam_fallback(
+                    start_xy,
+                    end_xy,
+                    "A* failed to find a path with current map(s).",
+                )
 
-        path_grid = []
-        curr = end_grid
-        while curr != start_grid:
-            path_grid.append(curr)
-            curr = came_from[curr]
-        path_grid.reverse()
+            path_grid = []
+            curr = end_grid
+            while curr != start_grid:
+                path_grid.append(curr)
+                curr = came_from[curr]
+            path_grid.reverse()
 
-        simplified_grid = path_grid
+        simplified_grid = self._simplify_grid_path(path_grid) if self.simplify_path else path_grid
 
         world_path = []
         for cell in simplified_grid:
