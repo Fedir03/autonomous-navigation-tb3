@@ -201,6 +201,50 @@ class PointAToBNode(Node):
         finally:
             self.awaiting_user_input = False
 
+    def parse_objective_token(self, token):
+        token = token.strip()
+        if not token:
+            return None
+
+        token_upper = token.upper()
+        if token_upper in KEY_POINTS:
+            return {
+                "external": KEY_POINTS[token_upper],
+                "name": token_upper,
+                "label": token_upper,
+            }
+
+        coord_text = token.strip().strip("()[]")
+        parts = [p.strip() for p in coord_text.split(",")]
+        if len(parts) != 2:
+            return None
+
+        try:
+            x = float(parts[0])
+            y = float(parts[1])
+        except ValueError:
+            return None
+
+        return {
+            "external": (x, y),
+            "name": None,
+            "label": "{:.2f},{:.2f}".format(x, y),
+        }
+
+    def parse_objective_sequence(self, user_input):
+        tokens = [t.strip() for t in user_input.split(";")]
+        if any(t == "" for t in tokens):
+            return None
+
+        objectives = []
+        for token in tokens:
+            objective = self.parse_objective_token(token)
+            if objective is None:
+                return None
+            objectives.append(objective)
+
+        return objectives
+
     def build_mandatory_route(self, target_external, target_name=None):
         tx, ty = target_external
         route_external = []
@@ -423,8 +467,12 @@ class PointAToBNode(Node):
                 continue
 
             try:
-                user_in = self.read_user_line("\nEnter Final Target (Name or X,Y): ").strip().upper()
-                if user_in in ["STATUS", "S", "POS", "POSE"]:
+                user_in = self.read_user_line(
+                    "\nEnter Objectives (A;B;DOOR;X,Y): "
+                ).strip()
+                user_in_upper = user_in.upper()
+
+                if user_in_upper in ["STATUS", "S", "POS", "POSE"]:
                     self.pose_estimator.get_robot_pose()
                     self.telemetry.print_navigation_status(
                         self.pose_estimator,
@@ -434,37 +482,67 @@ class PointAToBNode(Node):
                     )
                     continue
 
-                final_pos = None
-                final_external = None
-                target_name = None
-                if user_in in KEY_POINTS:
-                    final_external = KEY_POINTS[user_in]
-                    target_name = user_in
-                else:
-                    parts = user_in.split(",")
-                    if len(parts) == 2:
-                        final_external = (float(parts[0]), float(parts[1]))
-
-                if final_external is not None:
-                    final_pos = self.coords.to_internal_xy(final_external[0], final_external[1])
-
-                if not final_pos:
+                objectives = self.parse_objective_sequence(user_in)
+                if not objectives:
                     print("Invalid input.")
                     continue
+
+                final_external = objectives[-1]["external"]
+                target_name = objectives[-1]["name"]
+                final_pos = self.coords.to_internal_xy(final_external[0], final_external[1])
 
                 if not (self.pose_estimator.get_robot_pose() or self.pose_estimator.initial_pose_received):
                     print("Cannot localize robot in map frame yet.")
                     continue
 
-                (
-                    mandatory_internal,
-                    mandatory_external,
-                    door_transition_required,
-                    door_internal,
-                ) = self.build_mandatory_route(
-                    final_external,
-                    target_name,
-                )
+                if len(objectives) == 1:
+                    (
+                        mandatory_internal,
+                        mandatory_external,
+                        door_transition_required,
+                        door_internal,
+                    ) = self.build_mandatory_route(
+                        final_external,
+                        target_name,
+                    )
+                else:
+                    mandatory_internal = []
+                    mandatory_external = []
+                    for objective in objectives:
+                        ext_wp = objective["external"]
+                        int_wp = self.coords.to_internal_xy(ext_wp[0], ext_wp[1])
+                        if mandatory_internal:
+                            if math.hypot(
+                                int_wp[0] - mandatory_internal[-1][0],
+                                int_wp[1] - mandatory_internal[-1][1],
+                            ) < 0.05:
+                                continue
+                        mandatory_internal.append(int_wp)
+                        mandatory_external.append(ext_wp)
+
+                    if not mandatory_internal:
+                        print("Invalid input.")
+                        continue
+
+                    door_external = KEY_POINTS["DOOR"]
+                    door_in_route_index = None
+                    for idx, ext_wp in enumerate(mandatory_external):
+                        if math.hypot(
+                            ext_wp[0] - door_external[0],
+                            ext_wp[1] - door_external[1],
+                        ) < 0.30:
+                            door_in_route_index = idx
+                            break
+
+                    door_transition_required = (
+                        door_in_route_index is not None
+                        and door_in_route_index < (len(mandatory_external) - 1)
+                    )
+                    door_internal = (
+                        self.coords.to_internal_xy(door_external[0], door_external[1])
+                        if door_transition_required
+                        else None
+                    )
 
                 now = time.time()
                 self.route_manager.set_route(
