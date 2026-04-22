@@ -637,7 +637,7 @@ class PointAToBNode(Node):
 
 
 def main(args=None):
-    print("Initializing A* + Bug2 Navigation Node...")
+    print("Initializing A* + Pivot-Avoid Navigation Node...")
     rclpy.init(args=args)
     node = PointAToBNode()
     try:

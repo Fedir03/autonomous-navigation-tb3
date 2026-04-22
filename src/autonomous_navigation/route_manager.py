@@ -197,11 +197,11 @@ class RouteManager:
         self.next_segment_retry_time = now + 2.0
         return False
 
-    def try_replan_current_segment(self, current_xy, now):
+    def try_replan_current_segment(self, current_xy, now, force=False):
         if self.target is None:
             return False
 
-        if now - self.last_replan_attempt_time < self.config.replan_cooldown:
+        if (not force) and (now - self.last_replan_attempt_time < self.config.replan_cooldown):
             return False
         self.last_replan_attempt_time = now
 

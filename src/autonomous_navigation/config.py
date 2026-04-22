@@ -61,13 +61,18 @@ class NavigationConfig:
     collision_stop_distance: float = 0.22
     turn_side_clearance: float = 0.24
 
-    wall_follow_distance: float = 0.45
+    lidar_front_cone_deg: float = 100.0
+    lidar_side_cone_deg: float = 70.0
+
     avoid_turn_speed: float = 0.6
+    avoid_forward_speed: float = 0.10
+    avoid_turn_tolerance: float = 0.12
+    avoid_pivot_distance: float = 0.55
+    avoid_pivot_angle_candidates_deg: Tuple[float, ...] = (35.0, 50.0, 65.0)
+    avoid_pivot_reach_tolerance: float = 0.18
+    avoid_search_timeout: float = 1.2
+    avoid_max_search_cycles: int = 4
     wall_follow_speed: float = 0.07
-    wall_follow_kp: float = 1.2
-    wall_follow_min_time: float = 1.8
-    bug2_mline_tolerance: float = 0.18
-    bug2_leave_progress: float = 0.8
 
     progress_epsilon: float = 0.12
     stuck_timeout: float = 4.0

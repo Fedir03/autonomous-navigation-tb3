@@ -17,16 +17,17 @@ class LocalPlanner:
         self.min_right_dist = float("inf")
 
         # FSM state
-        # FOLLOW_GOAL | AVOID_OBSTACLE (Bug2 wall-follow) | BACKUP |
+        # FOLLOW_GOAL | AVOID_OBSTACLE (pivot bypass) | BACKUP |
         # DOOR_ALIGN_ZERO | DOOR_SEARCH_LEFT | DOOR_ALIGN_NINETY | DOOR_CROSS
         self.nav_state = "FOLLOW_GOAL"
         self.turn_away_sign = 1.0
 
-        # Bug2 context (obstacle contour follow + leave-to-goal-line condition)
-        self.bug2_line_start_xy = None
-        self.bug2_goal_xy = None
-        self.bug2_hit_distance_to_goal = float("inf")
-        self.bug2_follow_left_wall = True
+        # Simple obstacle bypass context.
+        self.avoid_stage = None
+        self.avoid_side_sign = 1.0
+        self.avoid_pivot_xy = None
+        self.avoid_search_start_time = 0.0
+        self.avoid_search_cycles = 0
 
         self.door_target_yaw_zero = 0.0
         self.door_target_yaw_ninety = 0.0
@@ -37,122 +38,272 @@ class LocalPlanner:
     def reset_for_new_route(self):
         self.nav_state = "FOLLOW_GOAL"
         self.turn_away_sign = 1.0
-        self.bug2_line_start_xy = None
-        self.bug2_goal_xy = None
-        self.bug2_hit_distance_to_goal = float("inf")
-        self.bug2_follow_left_wall = True
+        self.avoid_stage = None
+        self.avoid_side_sign = 1.0
+        self.avoid_pivot_xy = None
+        self.avoid_search_start_time = 0.0
+        self.avoid_search_cycles = 0
         self.door_target_yaw_zero = 0.0
         self.door_target_yaw_ninety = 0.0
         self.door_search_start_time = 0.0
         self.door_cross_start_xy = None
         self.door_left_opening_seen = False
 
+    def _min_distance_in_sector(self, msg, center_deg, width_deg):
+        if not msg.ranges:
+            return float("inf")
+        if abs(msg.angle_increment) < 1e-9:
+            return float("inf")
+
+        center = math.radians(center_deg)
+        half = math.radians(width_deg * 0.5)
+        best = float("inf")
+
+        for i, r in enumerate(msg.ranges):
+            if not (msg.range_min < r < msg.range_max):
+                continue
+            ang = msg.angle_min + (i * msg.angle_increment)
+            if abs(normalize_angle(ang - center)) <= half:
+                if r < best:
+                    best = r
+
+        return best
+
     def scan_callback(self, msg):
         try:
-            n = len(msg.ranges)
-            if n == 0:
+            if len(msg.ranges) == 0:
                 return
 
-            front = msg.ranges[0:15] + msg.ranges[-15:]
-            left = msg.ranges[60:100] if n >= 100 else msg.ranges[n // 4 : n // 3]
-            right = msg.ranges[260:300] if n >= 300 else msg.ranges[2 * n // 3 : 3 * n // 4]
-
-            valid_front = [r for r in front if msg.range_min < r < msg.range_max]
-            valid_left = [r for r in left if msg.range_min < r < msg.range_max]
-            valid_right = [r for r in right if msg.range_min < r < msg.range_max]
-
-            self.min_front_dist = min(valid_front) if valid_front else float("inf")
-            self.min_left_dist = min(valid_left) if valid_left else float("inf")
-            self.min_right_dist = min(valid_right) if valid_right else float("inf")
+            # Front cone widened to 100 degrees as requested.
+            self.min_front_dist = self._min_distance_in_sector(
+                msg,
+                0.0,
+                self.config.lidar_front_cone_deg,
+            )
+            self.min_left_dist = self._min_distance_in_sector(
+                msg,
+                90.0,
+                self.config.lidar_side_cone_deg,
+            )
+            self.min_right_dist = self._min_distance_in_sector(
+                msg,
+                -90.0,
+                self.config.lidar_side_cone_deg,
+            )
         except Exception:
             pass
 
-    def _handle_avoid_obstacle(self, move: TwistStamped):
-        move.twist.linear.x = 0.0
-        move.twist.angular.z = self.turn_away_sign * self.config.avoid_turn_speed
+    def _clear_avoid_state(self):
+        self.avoid_stage = None
+        self.avoid_pivot_xy = None
+        self.avoid_search_start_time = 0.0
+        self.avoid_search_cycles = 0
 
-    def _distance_point_to_line(self, point, line_start, line_end):
-        if line_start is None or line_end is None:
-            return float("inf")
+    def _is_direct_clear(self, route_manager, start_xy, end_xy, unknown_as_blocked=False):
+        planner = route_manager.planner
+        if hasattr(planner, "is_direct_segment_clear"):
+            return planner.is_direct_segment_clear(
+                start_xy,
+                end_xy,
+                unknown_as_blocked=unknown_as_blocked,
+            )
+        return False
 
-        x0, y0 = point
-        x1, y1 = line_start
-        x2, y2 = line_end
-        denom = math.hypot(x2 - x1, y2 - y1)
-        if denom < 1e-6:
-            return math.hypot(x0 - x1, y0 - y1)
+    def _find_pivot_candidate(self, current_x, current_y, current_yaw, target_xy, route_manager, preferred_side):
+        side_candidates = [preferred_side, -preferred_side]
+        base_distance = self.config.avoid_pivot_distance
 
-        num = abs((y2 - y1) * x0 - (x2 - x1) * y0 + (x2 * y1) - (y2 * x1))
-        return num / denom
+        for side in side_candidates:
+            side_clearance = self.min_left_dist if side > 0 else self.min_right_dist
+            if side_clearance < self.config.turn_side_clearance:
+                continue
 
-    def _enter_bug2_follow(self, current_x, current_y, target_xy):
+            for angle_deg in self.config.avoid_pivot_angle_candidates_deg:
+                heading = current_yaw + (side * math.radians(angle_deg))
+                for scale in (1.0, 1.35):
+                    d = base_distance * scale
+                    px = current_x + d * math.cos(heading)
+                    py = current_y + d * math.sin(heading)
+                    pivot = (px, py)
+
+                    if not self._is_direct_clear(
+                        route_manager,
+                        (current_x, current_y),
+                        pivot,
+                        unknown_as_blocked=False,
+                    ):
+                        continue
+
+                    if not self._is_direct_clear(
+                        route_manager,
+                        pivot,
+                        target_xy,
+                        unknown_as_blocked=True,
+                    ):
+                        continue
+
+                    return pivot, side
+
+        return None, preferred_side
+
+    def _start_pivot_avoid(self, now, current_x, current_y, current_yaw, target_xy, route_manager):
+        preferred_side = 1.0 if self.min_left_dist > self.min_right_dist else -1.0
+        pivot, side = self._find_pivot_candidate(
+            current_x,
+            current_y,
+            current_yaw,
+            target_xy,
+            route_manager,
+            preferred_side,
+        )
+
         self.nav_state = "AVOID_OBSTACLE"
-        self.bug2_line_start_xy = (current_x, current_y)
-        self.bug2_goal_xy = target_xy
-        self.bug2_hit_distance_to_goal = math.hypot(
-            target_xy[0] - current_x,
-            target_xy[1] - current_y,
-        )
+        self.avoid_side_sign = side
+        self.avoid_search_start_time = now
+        self.avoid_search_cycles = 0
 
-        # Keep the obstacle on the tighter side and move through the freer side.
-        self.bug2_follow_left_wall = self.min_left_dist < self.min_right_dist
-        self.turn_away_sign = 1.0 if self.min_left_dist > self.min_right_dist else -1.0
+        if pivot is not None:
+            self.avoid_pivot_xy = pivot
+            self.avoid_stage = "TURN_TO_PIVOT"
+            self.logger.info(
+                "Obstacle bypass: pivot found at ({:.2f}, {:.2f}).".format(
+                    pivot[0],
+                    pivot[1],
+                )
+            )
+        else:
+            self.avoid_pivot_xy = None
+            self.avoid_stage = "SEARCH_PIVOT"
+            self.logger.info("Obstacle bypass: no pivot yet, searching.")
 
-    def _should_leave_bug2(self, current_x, current_y):
-        if self.bug2_goal_xy is None or self.bug2_line_start_xy is None:
-            return False
+    def _step_pivot_avoid(self, move, now, current_x, current_y, current_yaw, target_xy, route_manager):
+        if target_xy is None:
+            return move
 
-        line_dist = self._distance_point_to_line(
-            (current_x, current_y),
-            self.bug2_line_start_xy,
-            self.bug2_goal_xy,
-        )
-        goal_dist = math.hypot(
-            self.bug2_goal_xy[0] - current_x,
-            self.bug2_goal_xy[1] - current_y,
-        )
+        if (
+            self.min_front_dist > self.config.follow_block_trigger_distance
+            and self._is_direct_clear(
+                route_manager,
+                (current_x, current_y),
+                target_xy,
+                unknown_as_blocked=False,
+            )
+        ):
+            route_manager.try_replan_current_segment((current_x, current_y), now, force=True)
+            self.nav_state = "FOLLOW_GOAL"
+            self._clear_avoid_state()
+            self.logger.info("Obstacle bypass complete: direct objective line is clear.")
+            return move
 
-        on_m_line = line_dist <= self.config.bug2_mline_tolerance
-        made_progress = goal_dist <= (
-            self.bug2_hit_distance_to_goal - self.config.bug2_leave_progress
-        )
-        enough_front_clearance = self.min_front_dist > self.config.caution_distance
-        return on_m_line and made_progress and enough_front_clearance
+        if self.avoid_stage == "SEARCH_PIVOT":
+            pivot, side = self._find_pivot_candidate(
+                current_x,
+                current_y,
+                current_yaw,
+                target_xy,
+                route_manager,
+                self.avoid_side_sign,
+            )
+            if pivot is not None:
+                self.avoid_pivot_xy = pivot
+                self.avoid_side_sign = side
+                self.avoid_stage = "TURN_TO_PIVOT"
+                return move
 
-    def _step_bug2_follow(self, move, current_x, current_y, current_yaw):
-        # If obstacle is still directly ahead, pivot to slide around it.
-        if self.min_front_dist < self.config.follow_block_trigger_distance:
             move.twist.linear.x = 0.0
-            move.twist.angular.z = (
-                -self.config.avoid_turn_speed
-                if self.bug2_follow_left_wall
-                else self.config.avoid_turn_speed
+            move.twist.angular.z = self.avoid_side_sign * (self.config.avoid_turn_speed * 0.8)
+
+            if (now - self.avoid_search_start_time) > self.config.avoid_search_timeout:
+                forced_replan_ok = route_manager.try_replan_current_segment(
+                    (current_x, current_y),
+                    now,
+                    force=True,
+                )
+                if forced_replan_ok and self.min_front_dist > self.config.follow_block_trigger_distance:
+                    self.nav_state = "FOLLOW_GOAL"
+                    self._clear_avoid_state()
+                    self.logger.info("Fallback replan succeeded after pivot search.")
+                    return move
+
+                self.avoid_search_cycles += 1
+                self.avoid_side_sign *= -1.0
+                self.avoid_search_start_time = now
+                if self.avoid_search_cycles >= self.config.avoid_max_search_cycles:
+                    self.logger.warn("Pivot search exhausted. Triggering BACKUP.")
+                    self.nav_state = "BACKUP"
+                    self._clear_avoid_state()
+            return move
+
+        if self.avoid_stage == "TURN_TO_PIVOT":
+            if self.avoid_pivot_xy is None:
+                self.avoid_stage = "SEARCH_PIVOT"
+                self.avoid_search_start_time = now
+                return move
+
+            yaw_target = math.atan2(
+                self.avoid_pivot_xy[1] - current_y,
+                self.avoid_pivot_xy[0] - current_x,
+            )
+            yaw_err = normalize_angle(yaw_target - current_yaw)
+            move.twist.linear.x = 0.0
+            move.twist.angular.z = max(
+                min(yaw_err * self.config.kp_angular, self.config.avoid_turn_speed),
+                -self.config.avoid_turn_speed,
+            )
+            if abs(yaw_err) <= self.config.avoid_turn_tolerance:
+                self.avoid_stage = "MOVE_TO_PIVOT"
+            return move
+
+        if self.avoid_stage == "MOVE_TO_PIVOT":
+            if self.avoid_pivot_xy is None:
+                self.avoid_stage = "SEARCH_PIVOT"
+                self.avoid_search_start_time = now
+                return move
+
+            if self.min_front_dist < self.config.safe_stop_distance:
+                self.avoid_stage = "SEARCH_PIVOT"
+                self.avoid_search_start_time = now
+                return move
+
+            dx = self.avoid_pivot_xy[0] - current_x
+            dy = self.avoid_pivot_xy[1] - current_y
+            dist = math.hypot(dx, dy)
+            if dist <= self.config.avoid_pivot_reach_tolerance:
+                self.avoid_stage = "TURN_TO_GOAL"
+                return move
+
+            yaw_err = normalize_angle(math.atan2(dy, dx) - current_yaw)
+            if abs(yaw_err) > self.config.yaw_stop_threshold:
+                move.twist.linear.x = 0.0
+            else:
+                lin = min(self.config.avoid_forward_speed, dist * self.config.kp_linear)
+                if lin > 0.0:
+                    lin = max(lin, min(self.config.min_motion_linear_speed, self.config.avoid_forward_speed))
+                move.twist.linear.x = lin
+
+            move.twist.angular.z = max(
+                min(yaw_err * self.config.kp_angular, self.config.avoid_turn_speed),
+                -self.config.avoid_turn_speed,
             )
             return move
 
-        desired = self.config.wall_follow_distance
-        side_dist = self.min_left_dist if self.bug2_follow_left_wall else self.min_right_dist
-        if not math.isfinite(side_dist):
-            side_dist = desired * 1.8
+        if self.avoid_stage == "TURN_TO_GOAL":
+            yaw_goal = math.atan2(target_xy[1] - current_y, target_xy[0] - current_x)
+            yaw_err = normalize_angle(yaw_goal - current_yaw)
+            move.twist.linear.x = 0.0
+            move.twist.angular.z = max(
+                min(yaw_err * self.config.kp_angular, self.config.avoid_turn_speed),
+                -self.config.avoid_turn_speed,
+            )
+            if abs(yaw_err) <= self.config.avoid_turn_tolerance:
+                route_manager.try_replan_current_segment((current_x, current_y), now, force=True)
+                self.nav_state = "FOLLOW_GOAL"
+                self._clear_avoid_state()
+                self.logger.info("Obstacle bypass complete: returning to FOLLOW_GOAL.")
+            return move
 
-        side_error = side_dist - desired
-        side_correction = side_error * self.config.wall_follow_kp
-        if not self.bug2_follow_left_wall:
-            side_correction = -side_correction
-
-        # Keep bias toward goal direction so wall-follow is not aimless.
-        if self.bug2_goal_xy is not None:
-            goal_heading = math.atan2(self.bug2_goal_xy[1] - current_y, self.bug2_goal_xy[0] - current_x)
-            goal_heading_err = normalize_angle(goal_heading - current_yaw)
-            goal_correction = max(min(goal_heading_err * 0.35, 0.3), -0.3)
-        else:
-            goal_correction = 0.0
-
-        move.twist.linear.x = self.config.wall_follow_speed
-        move.twist.angular.z = max(
-            min(side_correction + goal_correction, self.config.avoid_turn_speed),
-            -self.config.avoid_turn_speed,
-        )
+        self.avoid_stage = "SEARCH_PIVOT"
+        self.avoid_search_start_time = now
         return move
 
     def _apply_safety_clamps(self, move: TwistStamped):
@@ -275,7 +426,8 @@ class LocalPlanner:
                 return move
 
             # Recovered clearance: continue with normal obstacle handling.
-            self.nav_state = "AVOID_OBSTACLE"
+            self.nav_state = "FOLLOW_GOAL"
+            self._clear_avoid_state()
 
         if self.nav_state in ["DOOR_ALIGN_ZERO", "DOOR_SEARCH_LEFT", "DOOR_ALIGN_NINETY", "DOOR_CROSS"]:
             if (
@@ -305,31 +457,38 @@ class LocalPlanner:
             return move
 
         if self.nav_state == "AVOID_OBSTACLE":
-            replan_ok = route_manager.try_replan_current_segment((current_x, current_y), now)
-            if replan_ok and self.min_front_dist > self.config.follow_block_trigger_distance:
-                self.nav_state = "FOLLOW_GOAL"
-                self.bug2_line_start_xy = None
-                self.bug2_goal_xy = None
-                self.bug2_hit_distance_to_goal = float("inf")
-                self.logger.info("Replan path accepted. Returning to FOLLOW_GOAL.")
-            else:
-                self._step_bug2_follow(move, current_x, current_y, current_yaw)
-                if self._should_leave_bug2(current_x, current_y) and (
-                    replan_ok or self.min_front_dist > self.config.caution_distance
-                ):
-                    self.nav_state = "FOLLOW_GOAL"
-                    self.bug2_line_start_xy = None
-                    self.bug2_goal_xy = None
-                    self.bug2_hit_distance_to_goal = float("inf")
-                    self.logger.info("Bug2 leave condition met. Returning to FOLLOW_GOAL.")
-                else:
-                    return self._apply_safety_clamps(move)
+            self._step_pivot_avoid(
+                move,
+                now,
+                current_x,
+                current_y,
+                current_yaw,
+                target,
+                route_manager,
+            )
+            return self._apply_safety_clamps(move)
 
         # FOLLOW_GOAL + simple obstacle handling
         if self.min_front_dist < self.config.follow_block_trigger_distance:
             replan_ok = route_manager.try_replan_current_segment((current_x, current_y), now)
             if not replan_ok:
-                self._enter_bug2_follow(current_x, current_y, target)
+                self._start_pivot_avoid(
+                    now,
+                    current_x,
+                    current_y,
+                    current_yaw,
+                    target,
+                    route_manager,
+                )
+                self._step_pivot_avoid(
+                    move,
+                    now,
+                    current_x,
+                    current_y,
+                    current_yaw,
+                    target,
+                    route_manager,
+                )
                 return self._apply_safety_clamps(move)
             # Replan succeeded: continue below to follow the new path immediately
             # (typically starts with an in-place rotation), instead of returning

@@ -159,6 +159,31 @@ class GlobalPlanner:
 
         return extra
 
+    def is_direct_segment_clear(self, start_xy, end_xy, unknown_as_blocked=False):
+        start_grid = self.map_manager.world_to_grid(*start_xy)
+        end_grid = self.map_manager.world_to_grid(*end_xy)
+        if start_grid is None or end_grid is None:
+            return False
+
+        if not (
+            self.map_manager.in_bounds(start_grid[0], start_grid[1])
+            and self.map_manager.in_bounds(end_grid[0], end_grid[1])
+        ):
+            return False
+
+        for gx, gy in self._bresenham_cells(start_grid, end_grid):
+            if not self.map_manager.in_bounds(gx, gy):
+                return False
+
+            occ = self.map_manager.get_cell_occupancy(gx, gy)
+            if occ < 0 and unknown_as_blocked:
+                return False
+
+            if not self.is_cell_free(gx, gy):
+                return False
+
+        return True
+
     def find_nearest_free_cell(self, gx, gy, max_radius=None):
         width, height, _, _ = self.map_manager.get_active_map_info()
         if width <= 0 or height <= 0:
