@@ -55,8 +55,8 @@ class NavigationConfig:
 
     path_min_waypoint_spacing: float = 0.30
 
-    safe_stop_distance: float = 0.30
-    caution_distance: float = 0.40
+    safe_stop_distance: float = 0.35
+    caution_distance: float = 0.45
     follow_block_trigger_distance: float = 0.35
     collision_stop_distance: float = 0.22
     turn_side_clearance: float = 0.24
@@ -67,17 +67,17 @@ class NavigationConfig:
     wall_follow_kp: float = 1.2
     wall_follow_min_time: float = 1.8
     bug2_mline_tolerance: float = 0.18
-    bug2_leave_progress: float = 0.20
+    bug2_leave_progress: float = 0.8
 
     progress_epsilon: float = 0.12
-    stuck_timeout: float = 6.0
+    stuck_timeout: float = 4.0
     replan_cooldown: float = 0.8
 
     follow_obstacle_hit_reset_s: float = 1.2
     follow_obstacle_hit_threshold: int = 3
 
     # Emergency reverse: if an obstacle is closer than this, back up until clear.
-    backup_min_front_distance: float = 0.24
+    backup_min_front_distance: float = 0.30
     backup_speed: float = 0.08
 
     # Door-first routing rule for upper room objectives.
