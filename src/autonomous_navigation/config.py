@@ -36,8 +36,12 @@ class NavigationConfig:
     inflation_radius_m: float = 0.14
     nearest_free_search_radius_m: float = 0.70
     treat_unknown_as_free: bool = True
-    planner_heuristic_weight: float = 1.05
-    planner_directness_bias: float = 0.12
+    planner_heuristic_weight: float = 1.00
+    planner_directness_bias: float = 0.28
+    planner_unknown_cell_penalty: float = 0.30
+    planner_turn_penalty: float = 0.10
+    planner_straight_path_shortcut: bool = True
+    planner_simplify_path: bool = True
 
     max_speed: float = 0.18
     kp_linear: float = 0.5
@@ -50,17 +54,19 @@ class NavigationConfig:
 
     path_min_waypoint_spacing: float = 0.30
 
-    safe_stop_distance: float = 0.25
+    safe_stop_distance: float = 0.30
     caution_distance: float = 0.40
-    follow_block_trigger_distance: float = 0.28
-    collision_stop_distance: float = 0.18
-    turn_side_clearance: float = 0.20
+    follow_block_trigger_distance: float = 0.35
+    collision_stop_distance: float = 0.22
+    turn_side_clearance: float = 0.24
 
     wall_follow_distance: float = 0.45
     avoid_turn_speed: float = 0.6
-    wall_follow_speed: float = 0.08
+    wall_follow_speed: float = 0.07
     wall_follow_kp: float = 1.2
     wall_follow_min_time: float = 1.8
+    bug2_mline_tolerance: float = 0.18
+    bug2_leave_progress: float = 0.20
 
     progress_epsilon: float = 0.12
     stuck_timeout: float = 6.0
@@ -70,7 +76,7 @@ class NavigationConfig:
     follow_obstacle_hit_threshold: int = 3
 
     # Emergency reverse: if an obstacle is closer than this, back up until clear.
-    backup_min_front_distance: float = 0.20
+    backup_min_front_distance: float = 0.24
     backup_speed: float = 0.08
 
     # Door-first routing rule for upper room objectives.

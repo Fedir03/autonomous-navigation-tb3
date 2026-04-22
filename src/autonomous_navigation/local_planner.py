@@ -17,10 +17,16 @@ class LocalPlanner:
         self.min_right_dist = float("inf")
 
         # FSM state
-        # FOLLOW_GOAL | AVOID_OBSTACLE | BACKUP |
+        # FOLLOW_GOAL | AVOID_OBSTACLE (Bug2 wall-follow) | BACKUP |
         # DOOR_ALIGN_ZERO | DOOR_SEARCH_LEFT | DOOR_ALIGN_NINETY | DOOR_CROSS
         self.nav_state = "FOLLOW_GOAL"
         self.turn_away_sign = 1.0
+
+        # Bug2 context (obstacle contour follow + leave-to-goal-line condition)
+        self.bug2_line_start_xy = None
+        self.bug2_goal_xy = None
+        self.bug2_hit_distance_to_goal = float("inf")
+        self.bug2_follow_left_wall = True
 
         self.door_target_yaw_zero = 0.0
         self.door_target_yaw_ninety = 0.0
@@ -31,6 +37,10 @@ class LocalPlanner:
     def reset_for_new_route(self):
         self.nav_state = "FOLLOW_GOAL"
         self.turn_away_sign = 1.0
+        self.bug2_line_start_xy = None
+        self.bug2_goal_xy = None
+        self.bug2_hit_distance_to_goal = float("inf")
+        self.bug2_follow_left_wall = True
         self.door_target_yaw_zero = 0.0
         self.door_target_yaw_ninety = 0.0
         self.door_search_start_time = 0.0
@@ -61,7 +71,95 @@ class LocalPlanner:
         move.twist.linear.x = 0.0
         move.twist.angular.z = self.turn_away_sign * self.config.avoid_turn_speed
 
+    def _distance_point_to_line(self, point, line_start, line_end):
+        if line_start is None or line_end is None:
+            return float("inf")
+
+        x0, y0 = point
+        x1, y1 = line_start
+        x2, y2 = line_end
+        denom = math.hypot(x2 - x1, y2 - y1)
+        if denom < 1e-6:
+            return math.hypot(x0 - x1, y0 - y1)
+
+        num = abs((y2 - y1) * x0 - (x2 - x1) * y0 + (x2 * y1) - (y2 * x1))
+        return num / denom
+
+    def _enter_bug2_follow(self, current_x, current_y, target_xy):
+        self.nav_state = "AVOID_OBSTACLE"
+        self.bug2_line_start_xy = (current_x, current_y)
+        self.bug2_goal_xy = target_xy
+        self.bug2_hit_distance_to_goal = math.hypot(
+            target_xy[0] - current_x,
+            target_xy[1] - current_y,
+        )
+
+        # Keep the obstacle on the tighter side and move through the freer side.
+        self.bug2_follow_left_wall = self.min_left_dist < self.min_right_dist
+        self.turn_away_sign = 1.0 if self.min_left_dist > self.min_right_dist else -1.0
+
+    def _should_leave_bug2(self, current_x, current_y):
+        if self.bug2_goal_xy is None or self.bug2_line_start_xy is None:
+            return False
+
+        line_dist = self._distance_point_to_line(
+            (current_x, current_y),
+            self.bug2_line_start_xy,
+            self.bug2_goal_xy,
+        )
+        goal_dist = math.hypot(
+            self.bug2_goal_xy[0] - current_x,
+            self.bug2_goal_xy[1] - current_y,
+        )
+
+        on_m_line = line_dist <= self.config.bug2_mline_tolerance
+        made_progress = goal_dist <= (
+            self.bug2_hit_distance_to_goal - self.config.bug2_leave_progress
+        )
+        enough_front_clearance = self.min_front_dist > self.config.caution_distance
+        return on_m_line and made_progress and enough_front_clearance
+
+    def _step_bug2_follow(self, move, current_x, current_y, current_yaw):
+        # If obstacle is still directly ahead, pivot to slide around it.
+        if self.min_front_dist < self.config.follow_block_trigger_distance:
+            move.twist.linear.x = 0.0
+            move.twist.angular.z = (
+                -self.config.avoid_turn_speed
+                if self.bug2_follow_left_wall
+                else self.config.avoid_turn_speed
+            )
+            return move
+
+        desired = self.config.wall_follow_distance
+        side_dist = self.min_left_dist if self.bug2_follow_left_wall else self.min_right_dist
+        if not math.isfinite(side_dist):
+            side_dist = desired * 1.8
+
+        side_error = side_dist - desired
+        side_correction = side_error * self.config.wall_follow_kp
+        if not self.bug2_follow_left_wall:
+            side_correction = -side_correction
+
+        # Keep bias toward goal direction so wall-follow is not aimless.
+        if self.bug2_goal_xy is not None:
+            goal_heading = math.atan2(self.bug2_goal_xy[1] - current_y, self.bug2_goal_xy[0] - current_x)
+            goal_heading_err = normalize_angle(goal_heading - current_yaw)
+            goal_correction = max(min(goal_heading_err * 0.35, 0.3), -0.3)
+        else:
+            goal_correction = 0.0
+
+        move.twist.linear.x = self.config.wall_follow_speed
+        move.twist.angular.z = max(
+            min(side_correction + goal_correction, self.config.avoid_turn_speed),
+            -self.config.avoid_turn_speed,
+        )
+        return move
+
     def _apply_safety_clamps(self, move: TwistStamped):
+        # Conservative stop when frontal clearance is already in warning range.
+        if move.twist.linear.x > 0.0 and self.min_front_dist < self.config.safe_stop_distance:
+            move.twist.linear.x = 0.0
+
         # Never command forward motion when frontal clearance is critically low.
         if move.twist.linear.x > 0.0 and self.min_front_dist < self.config.collision_stop_distance:
             move.twist.linear.x = 0.0
@@ -207,21 +305,20 @@ class LocalPlanner:
             return move
 
         if self.nav_state == "AVOID_OBSTACLE":
-            self._handle_avoid_obstacle(move)
-            if (
-                route_manager.try_replan_current_segment((current_x, current_y), now)
-                and self.min_front_dist > self.config.caution_distance
-            ):
+            self._step_bug2_follow(move, current_x, current_y, current_yaw)
+            replan_ok = route_manager.try_replan_current_segment((current_x, current_y), now)
+            if self._should_leave_bug2(current_x, current_y) and (replan_ok or self.min_front_dist > self.config.caution_distance):
                 self.nav_state = "FOLLOW_GOAL"
+                self.bug2_line_start_xy = None
+                self.bug2_goal_xy = None
+                self.bug2_hit_distance_to_goal = float("inf")
+                self.logger.info("Bug2 leave condition met. Returning to FOLLOW_GOAL.")
             return self._apply_safety_clamps(move)
 
         # FOLLOW_GOAL + simple obstacle handling
         if self.min_front_dist < self.config.follow_block_trigger_distance:
             if not route_manager.try_replan_current_segment((current_x, current_y), now):
-                self.turn_away_sign = (
-                    1.0 if self.min_left_dist > self.min_right_dist else -1.0
-                )
-                self.nav_state = "AVOID_OBSTACLE"
+                self._enter_bug2_follow(current_x, current_y, target)
             return self._apply_safety_clamps(move)
 
         if route_manager.current_wp_index >= len(route_manager.path):
