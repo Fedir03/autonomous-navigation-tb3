@@ -28,6 +28,7 @@ class LocalPlanner:
         self.avoid_pivot_xy = None
         self.avoid_search_start_time = 0.0
         self.avoid_search_cycles = 0
+        self.avoid_retry_not_before = 0.0
 
         self.door_target_yaw_zero = 0.0
         self.door_target_yaw_ninety = 0.0
@@ -43,6 +44,7 @@ class LocalPlanner:
         self.avoid_pivot_xy = None
         self.avoid_search_start_time = 0.0
         self.avoid_search_cycles = 0
+        self.avoid_retry_not_before = 0.0
         self.door_target_yaw_zero = 0.0
         self.door_target_yaw_ninety = 0.0
         self.door_search_start_time = 0.0
@@ -111,7 +113,7 @@ class LocalPlanner:
 
     def _find_pivot_candidate(self, current_x, current_y, current_yaw, target_xy, route_manager, preferred_side):
         side_candidates = [preferred_side, -preferred_side]
-        base_distance = self.config.avoid_pivot_distance
+        current_goal_dist = math.hypot(target_xy[0] - current_x, target_xy[1] - current_y)
 
         for side in side_candidates:
             side_clearance = self.min_left_dist if side > 0 else self.min_right_dist
@@ -120,8 +122,7 @@ class LocalPlanner:
 
             for angle_deg in self.config.avoid_pivot_angle_candidates_deg:
                 heading = current_yaw + (side * math.radians(angle_deg))
-                for scale in (1.0, 1.35):
-                    d = base_distance * scale
+                for d in self.config.avoid_pivot_distance_candidates:
                     px = current_x + d * math.cos(heading)
                     py = current_y + d * math.sin(heading)
                     pivot = (px, py)
@@ -134,14 +135,23 @@ class LocalPlanner:
                     ):
                         continue
 
-                    if not self._is_direct_clear(
+                    pivot_goal_dist = math.hypot(target_xy[0] - px, target_xy[1] - py)
+                    if pivot_goal_dist > (current_goal_dist + self.config.avoid_goal_distance_slack):
+                        continue
+
+                    # Prefer direct-clear pivots, but allow riskier pivots that improve
+                    # progress when direct line to goal is still partially obstructed.
+                    if self._is_direct_clear(
                         route_manager,
                         pivot,
                         target_xy,
-                        unknown_as_blocked=True,
+                        unknown_as_blocked=False,
                     ):
-                        continue
+                        return pivot, side
 
+                    # Accept near-goal-progress pivots even when pivot->goal line
+                    # is not fully clear yet; local bypass + forced replan handles
+                    # the continuation.
                     return pivot, side
 
         return None, preferred_side
@@ -420,7 +430,7 @@ class LocalPlanner:
             self.nav_state = "BACKUP"
 
         if self.nav_state == "BACKUP":
-            if self.min_front_dist < self.config.backup_min_front_distance:
+            if self.min_front_dist < self.config.backup_recover_distance:
                 move.twist.linear.x = -abs(self.config.backup_speed)
                 move.twist.angular.z = 0.0
                 return move
@@ -428,6 +438,7 @@ class LocalPlanner:
             # Recovered clearance: continue with normal obstacle handling.
             self.nav_state = "FOLLOW_GOAL"
             self._clear_avoid_state()
+            self.avoid_retry_not_before = now + self.config.avoid_retry_cooldown
 
         if self.nav_state in ["DOOR_ALIGN_ZERO", "DOOR_SEARCH_LEFT", "DOOR_ALIGN_NINETY", "DOOR_CROSS"]:
             if (
@@ -470,6 +481,15 @@ class LocalPlanner:
 
         # FOLLOW_GOAL + simple obstacle handling
         if self.min_front_dist < self.config.follow_block_trigger_distance:
+            if now < self.avoid_retry_not_before:
+                move.twist.linear.x = 0.0
+                move.twist.angular.z = (
+                    self.config.avoid_turn_speed * 0.5
+                    if self.min_left_dist > self.min_right_dist
+                    else -self.config.avoid_turn_speed * 0.5
+                )
+                return self._apply_safety_clamps(move)
+
             replan_ok = route_manager.try_replan_current_segment((current_x, current_y), now)
             if not replan_ok:
                 self._start_pivot_avoid(

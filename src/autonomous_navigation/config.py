@@ -33,7 +33,7 @@ class NavigationConfig:
     base_map_reference_origin_map_xy: Tuple[float, float] = (-1.590, -4.627)
 
     # Global planner obstacle inflation in meters (resolution-independent).
-    inflation_radius_m: float = 0.10
+    inflation_radius_m: float = 0.07
     nearest_free_search_radius_m: float = 0.45
     treat_unknown_as_free: bool = True
     planner_heuristic_weight: float = 1.00
@@ -55,23 +55,26 @@ class NavigationConfig:
 
     path_min_waypoint_spacing: float = 0.30
 
-    safe_stop_distance: float = 0.35
-    caution_distance: float = 0.45
-    follow_block_trigger_distance: float = 0.35
-    collision_stop_distance: float = 0.22
+    safe_stop_distance: float = 0.28
+    caution_distance: float = 0.38
+    follow_block_trigger_distance: float = 0.30
+    collision_stop_distance: float = 0.18
     turn_side_clearance: float = 0.24
 
     lidar_front_cone_deg: float = 100.0
     lidar_side_cone_deg: float = 70.0
 
     avoid_turn_speed: float = 0.6
-    avoid_forward_speed: float = 0.10
+    avoid_forward_speed: float = 0.12
     avoid_turn_tolerance: float = 0.12
     avoid_pivot_distance: float = 0.55
-    avoid_pivot_angle_candidates_deg: Tuple[float, ...] = (35.0, 50.0, 65.0)
+    avoid_pivot_distance_candidates: Tuple[float, ...] = (0.28, 0.38, 0.50, 0.65)
+    avoid_pivot_angle_candidates_deg: Tuple[float, ...] = (20.0, 30.0, 45.0, 60.0, 75.0)
+    avoid_goal_distance_slack: float = 0.25
     avoid_pivot_reach_tolerance: float = 0.18
-    avoid_search_timeout: float = 1.2
-    avoid_max_search_cycles: int = 4
+    avoid_search_timeout: float = 0.8
+    avoid_max_search_cycles: int = 6
+    avoid_retry_cooldown: float = 1.0
     wall_follow_speed: float = 0.07
 
     progress_epsilon: float = 0.12
@@ -82,7 +85,8 @@ class NavigationConfig:
     follow_obstacle_hit_threshold: int = 3
 
     # Emergency reverse: if an obstacle is closer than this, back up until clear.
-    backup_min_front_distance: float = 0.30
+    backup_min_front_distance: float = 0.20
+    backup_recover_distance: float = 0.34
     backup_speed: float = 0.08
 
     # Door-first routing rule for upper room objectives.
