@@ -305,21 +305,35 @@ class LocalPlanner:
             return move
 
         if self.nav_state == "AVOID_OBSTACLE":
-            self._step_bug2_follow(move, current_x, current_y, current_yaw)
             replan_ok = route_manager.try_replan_current_segment((current_x, current_y), now)
-            if self._should_leave_bug2(current_x, current_y) and (replan_ok or self.min_front_dist > self.config.caution_distance):
+            if replan_ok and self.min_front_dist > self.config.follow_block_trigger_distance:
                 self.nav_state = "FOLLOW_GOAL"
                 self.bug2_line_start_xy = None
                 self.bug2_goal_xy = None
                 self.bug2_hit_distance_to_goal = float("inf")
-                self.logger.info("Bug2 leave condition met. Returning to FOLLOW_GOAL.")
-            return self._apply_safety_clamps(move)
+                self.logger.info("Replan path accepted. Returning to FOLLOW_GOAL.")
+            else:
+                self._step_bug2_follow(move, current_x, current_y, current_yaw)
+                if self._should_leave_bug2(current_x, current_y) and (
+                    replan_ok or self.min_front_dist > self.config.caution_distance
+                ):
+                    self.nav_state = "FOLLOW_GOAL"
+                    self.bug2_line_start_xy = None
+                    self.bug2_goal_xy = None
+                    self.bug2_hit_distance_to_goal = float("inf")
+                    self.logger.info("Bug2 leave condition met. Returning to FOLLOW_GOAL.")
+                else:
+                    return self._apply_safety_clamps(move)
 
         # FOLLOW_GOAL + simple obstacle handling
         if self.min_front_dist < self.config.follow_block_trigger_distance:
-            if not route_manager.try_replan_current_segment((current_x, current_y), now):
+            replan_ok = route_manager.try_replan_current_segment((current_x, current_y), now)
+            if not replan_ok:
                 self._enter_bug2_follow(current_x, current_y, target)
-            return self._apply_safety_clamps(move)
+                return self._apply_safety_clamps(move)
+            # Replan succeeded: continue below to follow the new path immediately
+            # (typically starts with an in-place rotation), instead of returning
+            # early with zero commands.
 
         if route_manager.current_wp_index >= len(route_manager.path):
             self.logger.info("Segment reached.")

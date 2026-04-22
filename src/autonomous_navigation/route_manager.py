@@ -35,19 +35,21 @@ class RouteManager:
             return None
         return (self.target_x, self.target_y)
 
-    def _nearest_waypoint_index(self, current_xy):
+    def _starting_waypoint_index(self, current_xy):
         if not self.path:
             return 0
 
         cx, cy = current_xy
-        best_idx = 0
-        best_dist = float("inf")
+
+        # Path is produced in start->goal order; choose the first waypoint that
+        # is not effectively already reached to avoid snapping to a later nearby
+        # waypoint on self-crossing/curved replans.
         for idx, wp in enumerate(self.path):
             d = math.hypot(wp[0] - cx, wp[1] - cy)
-            if d < best_dist:
-                best_dist = d
-                best_idx = idx
-        return best_idx
+            if d >= (self.config.xy_tolerance * 0.8):
+                return idx
+
+        return len(self.path) - 1
 
     def set_route(
         self,
@@ -165,7 +167,7 @@ class RouteManager:
                 )
 
             self.next_segment_retry_time = 0.0
-            self.current_wp_index = self._nearest_waypoint_index(current_xy)
+            self.current_wp_index = self._starting_waypoint_index(current_xy)
             self.is_moving = True
             self.replan_fail_streak = 0
             self.best_distance_on_segment = math.hypot(
@@ -207,7 +209,7 @@ class RouteManager:
         new_path = self.planner.calculate_path(current_xy, self.target)
         if new_path:
             self.path = new_path
-            self.current_wp_index = self._nearest_waypoint_index(current_xy)
+            self.current_wp_index = self._starting_waypoint_index(current_xy)
             self.is_moving = True
             self.replan_fail_streak = 0
             self.best_distance_on_segment = math.hypot(
