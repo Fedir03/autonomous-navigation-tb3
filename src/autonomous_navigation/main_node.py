@@ -229,20 +229,32 @@ class PointAToBNode(Node):
                 self.phase3_active = True
             return
 
-        if (coarse is not None) and (not self.phase3_refine_attempted):
-            if self._start_phase3_segment(now, coarse, "station coarse estimate"):
-                self.phase3_pending = False
-                self.phase3_active = True
-                self.phase3_refine_attempted = True
+        # If we have a coarse station estimate, keep refining around it instead of
+        # jumping to distant fallback targets.
+        if coarse is not None:
+            d_coarse = math.hypot(coarse[0] - current_xy[0], coarse[1] - current_xy[1])
+            if d_coarse > self.config.phase3_dock_xy_tolerance:
+                if self._start_phase3_segment(now, coarse, "station coarse estimate"):
+                    self.phase3_pending = False
+                    self.phase3_active = True
+                    self.phase3_refine_attempted = True
+            else:
+                print("Phase 3: at coarse station area, waiting for precise center refinement.")
+                self.phase3_last_start_attempt = now
             return
 
         if self.phase3_fallback_index < len(self.config.phase3_search_fallback_targets):
             fallback_name = self.config.phase3_search_fallback_targets[self.phase3_fallback_index]
             self.phase3_fallback_index += 1
             if fallback_name in KEY_POINTS:
+                fallback_external = KEY_POINTS[fallback_name]
+                fallback_internal = self.coords.to_internal_xy(
+                    fallback_external[0],
+                    fallback_external[1],
+                )
                 if self._start_phase3_segment(
                     now,
-                    KEY_POINTS[fallback_name],
+                    fallback_internal,
                     "fallback {}".format(fallback_name),
                 ):
                     self.phase3_pending = False
