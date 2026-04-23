@@ -259,50 +259,11 @@ class PointAToBNode(Node):
                 return
         route_external.append(ext_wp)
 
-    def _clamp_passadis_waypoint(self, x, y, door_external):
-        door_x, door_y = door_external
-        wall_margin = max(self.config.passadis_scan_wall_margin, 0.15)
-        length_x = max(self.config.passadis_scan_length_x, 2.0)
-        width_y = max(self.config.passadis_scan_width_y, 1.2)
-
-        x_min = door_x - length_x + wall_margin
-        x_max = door_x - wall_margin
-        y_min = door_y + wall_margin
-        y_max = door_y + width_y - wall_margin
-
-        return (
-            min(max(x, x_min), x_max),
-            min(max(y, y_min), y_max),
-        )
-
-    def generate_passadis_exploration_waypoints(self, door_external):
-        # Explicit door-anchored zigzag in user coordinates.
-        # The route stays in the Passadis corridor, always moving toward
-        # negative X and alternating between two safe Y levels.
-        door_x, door_y = door_external
-        x_end = 1.0
-        x_step = max(self.config.passadis_scan_x_step, 1.5)
-        y_entry = door_y + 1.5
-        y_high = door_y + 2.5
-        y_low = door_y + 0.5
-
+    def generate_passadis_preset_waypoints(self):
         waypoints = []
-        waypoints.append((door_x, y_entry))
-        waypoints.append((door_x, y_high))
-
-        x = door_x
-        current_y = y_high
-        while x > x_end:
-            next_x = max(x - x_step, x_end)
-            waypoints.append((next_x, current_y))
-
-            if next_x <= x_end + 1e-6:
-                break
-
-            current_y = y_low if current_y == y_high else y_high
-            waypoints.append((next_x, current_y))
-            x = next_x
-
+        for name in self.config.phase2_preset_route:
+            if name in KEY_POINTS:
+                self._append_external_waypoint(waypoints, KEY_POINTS[name])
         return waypoints
 
     def build_mandatory_route(self, objectives, current_external_xy):
@@ -350,8 +311,8 @@ class PointAToBNode(Node):
                 and (not phase2_injected)
                 and (not is_door_obj)
             ):
-                for explore_wp in self.generate_passadis_exploration_waypoints(door_external):
-                    self._append_external_waypoint(route_external, explore_wp)
+                for preset_wp in self.generate_passadis_preset_waypoints():
+                    self._append_external_waypoint(route_external, preset_wp)
                 phase2_injected = True
 
             self._append_external_waypoint(route_external, ext_wp)
@@ -611,6 +572,7 @@ class PointAToBNode(Node):
                     now,
                     door_transition_required=door_transition_required,
                     door_waypoint=door_internal,
+                    speed_mode=("passadis" if phase2_injected else "normal"),
                 )
                 self.local_planner.reset_for_new_route()
 
@@ -625,7 +587,7 @@ class PointAToBNode(Node):
                     )
                 )
                 if phase2_injected:
-                    print("Phase 2 enabled: exploration route injected before final BASE approach.")
+                    print("Phase 2 enabled: preset Passadis route injected before final BASE approach.")
 
                 self.telemetry.print_navigation_status(
                     self.pose_estimator,

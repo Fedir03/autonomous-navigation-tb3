@@ -28,6 +28,7 @@ class RouteManager:
         self.door_transition_done = False
         self.door_transition_active = False
         self.door_waypoint = None
+        self.speed_mode = "normal"
 
     @property
     def target(self):
@@ -58,6 +59,7 @@ class RouteManager:
         now,
         door_transition_required=False,
         door_waypoint=None,
+        speed_mode="normal",
     ):
         self.final_target = final_target
         self.global_waypoints = list(mandatory_waypoints)
@@ -78,6 +80,7 @@ class RouteManager:
         self.door_transition_done = False
         self.door_transition_active = False
         self.door_waypoint = door_waypoint
+        self.speed_mode = speed_mode
 
     def clear_route(self):
         self.target_x = None
@@ -94,6 +97,7 @@ class RouteManager:
         self.door_transition_done = False
         self.door_transition_active = False
         self.door_waypoint = None
+        self.speed_mode = "normal"
 
     def begin_door_transition_if_needed(self):
         if (

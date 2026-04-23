@@ -12,6 +12,7 @@ KEY_POINTS: Dict[str, Tuple[float, float]] = {
     "F": (5.480, 10.545),
     "DOOR": (6.280, 11.685),
     "Q": (9.115, 14.590),
+    "U": (1.075, 16.190),
     "R": (7.310, 16.190),
     "S": (3.675, 14.190),
     "T": (1.275, 14.990),
@@ -96,12 +97,8 @@ class NavigationConfig:
     # Phase 2 mission: after entering Passadis, explore area then return to BASE.
     phase2_enabled: bool = True
     phase2_trigger_targets: Tuple[str, ...] = ("BASE",)
-    # Rectangular zigzag exploration after DOOR crossing.
-    passadis_scan_length_x: float = 10.0
-    passadis_scan_width_y: float = 3.0
-    passadis_scan_wall_margin: float = 0.25
-    passadis_scan_first_offset_from_front: float = 2.5
-    passadis_scan_x_step: float = 2.0
+    phase2_preset_route: Tuple[str, ...] = ("R", "U", "T", "S", "Q", "R", "BASE")
+    passadis_max_speed: float = 0.38
 
     # Door transition behavior (user/external frame references).
     door_align_tolerance: float = 0.10

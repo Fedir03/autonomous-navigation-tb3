@@ -554,8 +554,12 @@ class LocalPlanner:
             move.twist.linear.x = 0.0
             move.twist.angular.z = max(min(yaw_err * self.config.kp_angular, 1.0), -1.0)
         else:
+            cruise_speed = self.config.max_speed
+            if getattr(route_manager, "speed_mode", "normal") == "passadis":
+                cruise_speed = max(cruise_speed, self.config.passadis_max_speed)
+
             max_allowed = (
-                self.config.max_speed
+                cruise_speed
                 if self.min_front_dist > self.config.caution_distance
                 else self.config.wall_follow_speed
             )
