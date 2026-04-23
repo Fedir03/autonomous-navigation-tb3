@@ -276,40 +276,32 @@ class PointAToBNode(Node):
         )
 
     def generate_passadis_exploration_waypoints(self, door_external):
-        # Door-anchored rectangular zigzag in user coordinates:
-        # 10m towards negative X and 3m towards positive Y.
+        # Explicit door-anchored zigzag in user coordinates.
+        # The route stays in the Passadis corridor, always moving toward
+        # negative X and alternating between two safe Y levels.
         door_x, door_y = door_external
-        length_x = max(self.config.passadis_scan_length_x, 2.0)
-        width_y = max(self.config.passadis_scan_width_y, 1.2)
-        wall_margin = max(self.config.passadis_scan_wall_margin, 0.15)
-
-        x_start = door_x - wall_margin
-        x_end = door_x - length_x + wall_margin
-        x_step = max(self.config.passadis_scan_x_step, 0.5)
-
-        y_low = door_y + wall_margin
-        y_high = door_y + width_y - wall_margin
-        first_y = min(max(door_y + self.config.passadis_scan_first_offset_from_front, y_low), y_high)
-        other_y = y_low if abs(first_y - y_high) < abs(first_y - y_low) else y_high
-
-        x_positions = [x_start]
-        x = x_start - x_step
-        while x > x_end:
-            x_positions.append(x)
-            x -= x_step
-        if not math.isclose(x_positions[-1], x_end, abs_tol=1e-6):
-            x_positions.append(x_end)
+        x_end = 1.0
+        x_step = max(self.config.passadis_scan_x_step, 1.5)
+        y_entry = door_y + 1.5
+        y_high = door_y + 2.5
+        y_low = door_y + 0.5
 
         waypoints = []
-        waypoints.append(self._clamp_passadis_waypoint(x_positions[0], first_y, door_external))
-        waypoints.append(self._clamp_passadis_waypoint(x_positions[0], other_y, door_external))
+        waypoints.append((door_x, y_entry))
+        waypoints.append((door_x, y_high))
 
-        target_y = first_y
-        for idx, x_curr in enumerate(x_positions):
-            waypoints.append(self._clamp_passadis_waypoint(x_curr, target_y, door_external))
-            if idx < len(x_positions) - 1:
-                waypoints.append(self._clamp_passadis_waypoint(x_positions[idx + 1], target_y, door_external))
-            target_y = other_y if target_y == first_y else first_y
+        x = door_x
+        current_y = y_high
+        while x > x_end:
+            next_x = max(x - x_step, x_end)
+            waypoints.append((next_x, current_y))
+
+            if next_x <= x_end + 1e-6:
+                break
+
+            current_y = y_low if current_y == y_high else y_high
+            waypoints.append((next_x, current_y))
+            x = next_x
 
         return waypoints
 
