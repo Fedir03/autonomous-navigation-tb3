@@ -11,9 +11,11 @@ KEY_POINTS: Dict[str, Tuple[float, float]] = {
     "E": (5.880, 8.145),
     "F": (5.480, 10.545),
     "DOOR": (6.280, 11.685),
+    "MIDWAY_DOOR": (7.810, 11.685),
     "Q": (9.115, 14.590),
     "U": (1.075, 16.190),
     "R": (7.310, 16.190),
+    "R_BIS": (7.810, 16.190),
     "S": (3.675, 14.190),
     "T": (1.275, 14.990),
     "BASE": (3.475, 15.390),
@@ -92,7 +94,7 @@ class NavigationConfig:
 
     # Door-first routing rule for upper room objectives.
     door_required_y_threshold: float = 8.5
-    door_forced_targets: Tuple[str, ...] = ("Q", "R", "S", "T", "BASE")
+    door_forced_targets: Tuple[str, ...] = ("Q", "R", "R_BIS", "S", "T", "BASE")
 
     # Phase 2 mission: after entering Passadis, explore area then return to BASE.
     phase2_enabled: bool = True

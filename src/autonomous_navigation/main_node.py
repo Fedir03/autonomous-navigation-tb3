@@ -389,6 +389,13 @@ class PointAToBNode(Node):
                 self._append_external_waypoint(waypoints, KEY_POINTS[name])
         return waypoints
 
+    def generate_door_chain_waypoints(self):
+        waypoints = []
+        for name in ("DOOR", "MIDWAY_DOOR", "R_BIS"):
+            if name in KEY_POINTS:
+                self._append_external_waypoint(waypoints, KEY_POINTS[name])
+        return waypoints
+
     def build_mandatory_route(self, objectives, current_external_xy):
         if not objectives:
             return [], [], False, None, False
@@ -425,7 +432,8 @@ class PointAToBNode(Node):
             )
 
             if needs_door_first:
-                self._append_external_waypoint(route_external, door_external)
+                for door_wp in self.generate_door_chain_waypoints():
+                    self._append_external_waypoint(route_external, door_wp)
                 door_passed = True
 
             phase2_target = (
@@ -454,23 +462,9 @@ class PointAToBNode(Node):
             for p in route_external
         ]
 
-        door_in_route_index = None
-        for idx, ext_wp in enumerate(route_external):
-            if math.hypot(ext_wp[0] - door_external[0], ext_wp[1] - door_external[1]) < 0.30:
-                door_in_route_index = idx
-                break
-
-        door_transition_required = (
-            door_in_route_index is not None
-            and door_in_route_index < (len(route_external) - 1)
-        )
-        door_internal = (
-            self.coords.to_internal_xy(door_external[0], door_external[1])
-            if door_transition_required
-            else None
-        )
-
-        return mandatory_internal, route_external, door_transition_required, door_internal, phase2_injected
+        # Door traversal is handled as explicit A* waypoints, so the special
+        # door-transition FSM is not used anymore.
+        return mandatory_internal, route_external, False, None, phase2_injected
 
     def queue_status_print(self):
         with self.status_lock:
