@@ -96,13 +96,12 @@ class NavigationConfig:
     # Phase 2 mission: after entering Passadis, explore area then return to BASE.
     phase2_enabled: bool = True
     phase2_trigger_targets: Tuple[str, ...] = ("BASE",)
-    # Use approximate assignment dimensions and discover lane endpoints from live map.
-    passadis_scan_length_x: float = 10.4
-    passadis_scan_width_y: float = 3.3
-    passadis_scan_start_offset_y: float = 0.35
-    passadis_scan_lane_spacing: float = 0.70
+    # Rectangular zigzag exploration after DOOR crossing.
+    passadis_scan_length_x: float = 10.0
+    passadis_scan_width_y: float = 3.0
     passadis_scan_wall_margin: float = 0.25
-    passadis_scan_min_lane_span: float = 1.0
+    passadis_scan_first_offset_from_front: float = 2.5
+    passadis_scan_x_step: float = 2.0
 
     # Door transition behavior (user/external frame references).
     door_align_tolerance: float = 0.10

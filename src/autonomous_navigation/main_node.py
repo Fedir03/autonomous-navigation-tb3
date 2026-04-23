@@ -302,39 +302,49 @@ class PointAToBNode(Node):
         return snapped[0]
 
     def generate_passadis_exploration_waypoints(self, anchor_external_xy):
-        # Dynamic wall-to-wall scan: build lanes in Y and discover X endpoints from map.
+        # Rectangular zigzag per assignment geometry:
+        # long side on -X (~10m), short side on +Y (~3m).
         anchor_x, anchor_y = anchor_external_xy
-        lane_spacing = max(self.config.passadis_scan_lane_spacing, 0.4)
-        start_y = anchor_y + self.config.passadis_scan_start_offset_y
-        end_y = start_y + self.config.passadis_scan_width_y
+        length_x = max(self.config.passadis_scan_length_x, 2.0)
+        width_y = max(self.config.passadis_scan_width_y, 1.2)
+        wall_margin = max(self.config.passadis_scan_wall_margin, 0.15)
 
-        lane_ys = []
-        y = start_y
-        while y <= (end_y + 1e-6):
-            lane_ys.append(y)
-            y += lane_spacing
-        if not lane_ys:
-            lane_ys = [start_y]
+        y_low = anchor_y + wall_margin
+        y_high = anchor_y + width_y - wall_margin
+        if y_high <= y_low:
+            y_low = anchor_y + 0.25
+            y_high = anchor_y + max(width_y - 0.25, 0.55)
+
+        # Start near front wall, then move 2.5m away on Y before launching zigzag.
+        y_front_safe = y_high
+        first_y = y_front_safe - self.config.passadis_scan_first_offset_from_front
+        first_y = min(max(first_y, y_low), y_high)
+
+        x_end = anchor_x - length_x
+        x_step = max(self.config.passadis_scan_x_step, 0.5)
+
+        x_positions = [anchor_x]
+        x = anchor_x - x_step
+        while x > x_end:
+            x_positions.append(x)
+            x -= x_step
+        x_positions.append(x_end)
 
         waypoints = []
-        left_to_right = True
-        for lane_y in lane_ys:
-            left_x = self._scan_lane_endpoint_x(anchor_x, lane_y, direction=-1.0)
-            right_x = self._scan_lane_endpoint_x(anchor_x, lane_y, direction=1.0)
+        # Prime sequence: front-safe point, then lane start point.
+        waypoints.append(self._snap_external_to_nearest_free((anchor_x, y_front_safe)))
+        waypoints.append(self._snap_external_to_nearest_free((anchor_x, first_y)))
 
-            if (right_x - left_x) < self.config.passadis_scan_min_lane_span:
-                continue
+        # Alternate short-side traversals while progressing left on X.
+        target_y = y_high if abs(y_high - first_y) >= abs(y_low - first_y) else y_low
+        for idx, x_curr in enumerate(x_positions):
+            waypoints.append(self._snap_external_to_nearest_free((x_curr, target_y)))
+            if idx >= len(x_positions) - 1:
+                break
 
-            left_wp = self._snap_external_to_nearest_free((left_x, lane_y))
-            right_wp = self._snap_external_to_nearest_free((right_x, lane_y))
-
-            if left_to_right:
-                waypoints.append(left_wp)
-                waypoints.append(right_wp)
-            else:
-                waypoints.append(right_wp)
-                waypoints.append(left_wp)
-            left_to_right = not left_to_right
+            x_next = x_positions[idx + 1]
+            waypoints.append(self._snap_external_to_nearest_free((x_next, target_y)))
+            target_y = y_low if target_y == y_high else y_high
 
         return waypoints
 
