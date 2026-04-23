@@ -37,14 +37,14 @@ class NavigationConfig:
     nearest_free_search_radius_m: float = 0.45
     treat_unknown_as_free: bool = True
     planner_heuristic_weight: float = 1.00
-    planner_directness_bias: float = 0.45
+    planner_directness_bias: float = 0.7
     planner_unknown_cell_penalty: float = 2.20
     planner_turn_penalty: float = 0.20
     planner_reverse_progress_penalty: float = 0.80
     planner_straight_path_shortcut: bool = True
     planner_simplify_path: bool = True
 
-    max_speed: float = 0.18
+    max_speed: float = 0.28
     kp_linear: float = 0.5
     kp_angular: float = 1.0
     xy_tolerance: float = 0.15
@@ -55,19 +55,19 @@ class NavigationConfig:
 
     path_min_waypoint_spacing: float = 0.30
 
-    safe_stop_distance: float = 0.28
-    caution_distance: float = 0.38
+    safe_stop_distance: float = 0.25
+    caution_distance: float = 0.28
     follow_block_trigger_distance: float = 0.30
     collision_stop_distance: float = 0.18
-    turn_side_clearance: float = 0.24
+    turn_side_clearance: float = 0.18
 
-    lidar_front_cone_deg: float = 100.0
+    lidar_front_cone_deg: float = 90.0
     lidar_side_cone_deg: float = 70.0
 
     avoid_turn_speed: float = 0.6
     avoid_forward_speed: float = 0.12
     avoid_turn_tolerance: float = 0.12
-    avoid_pivot_distance: float = 0.55
+    avoid_pivot_distance: float = 0.30
     avoid_pivot_distance_candidates: Tuple[float, ...] = (0.28, 0.38, 0.50, 0.65)
     avoid_pivot_angle_candidates_deg: Tuple[float, ...] = (20.0, 30.0, 45.0, 60.0, 75.0)
     avoid_goal_distance_slack: float = 0.25

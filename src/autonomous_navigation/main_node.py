@@ -282,10 +282,9 @@ class PointAToBNode(Node):
                 if obj_name is not None
                 else False
             )
-            forced_by_coordinate = ext_wp[1] > self.config.door_required_y_threshold
 
             needs_door_first = (not door_passed) and (not is_door_obj) and (
-                forced_by_name or forced_by_coordinate
+                forced_by_name
             )
 
             if needs_door_first:
