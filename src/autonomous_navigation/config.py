@@ -100,6 +100,24 @@ class NavigationConfig:
     phase2_preset_route: Tuple[str, ...] = ("R", "U", "T", "S", "Q", "R", "BASE")
     passadis_max_speed: float = 0.38
 
+    # Phase 3 mission: detect charging station and dock to its center.
+    phase3_enabled: bool = True
+    phase3_search_fallback_targets: Tuple[str, ...] = ("Q", "R")
+    phase3_dock_xy_tolerance: float = 0.22
+    phase3_retry_cooldown: float = 1.5
+
+    # Charging-station detector (4 pillars around 40cm x 40cm square).
+    station_max_detection_range: float = 2.2
+    station_cluster_dist: float = 0.05
+    station_min_cluster_points: int = 3
+    station_max_pillars: int = 20
+    station_side_len: float = 0.40
+    station_geom_tol: float = 0.12
+    station_max_square_combinations: int = 500
+    station_coarse_ema_alpha: float = 0.25
+    station_precise_ema_alpha: float = 0.20
+    station_min_precise_observations: int = 3
+
     # Door transition behavior (user/external frame references).
     door_align_tolerance: float = 0.10
     door_heading_kp: float = 1.4

@@ -22,6 +22,7 @@ from .local_planner import LocalPlanner
 from .map_manager import MapManager
 from .pose_estimator import PoseEstimator
 from .route_manager import RouteManager
+from .station_detector import ChargingStationDetector
 from .telemetry import Telemetry
 
 
@@ -54,6 +55,7 @@ class PointAToBNode(Node):
         self.route_manager = RouteManager(self.global_planner, self.config, self.get_logger())
         self.local_planner = LocalPlanner(self.config, self.get_logger(), self.coords)
         self.telemetry = Telemetry(self, self.coords, KEY_POINTS)
+        self.station_detector = ChargingStationDetector(self.config, self.get_logger())
 
         qos_best_effort = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, depth=10)
         qos_map = QoSProfile(
@@ -74,7 +76,7 @@ class PointAToBNode(Node):
         self.base_map_aligned_pub = self.create_publisher(OccupancyGrid, "/base_map_aligned", qos_map)
 
         self.create_subscription(Odometry, "/odom", self.pose_estimator.odom_callback, qos_best_effort)
-        self.create_subscription(LaserScan, "/scan", self.local_planner.scan_callback, qos_best_effort)
+        self.create_subscription(LaserScan, "/scan", self.scan_callback, qos_best_effort)
         self.create_subscription(OccupancyGrid, "/map", self.map_callback, qos_map)
         self.create_subscription(OccupancyGrid, "/base_map", self.base_map_callback, qos_map)
         # Fallback QoS to receive map topics when publisher QoS differs.
@@ -97,6 +99,13 @@ class PointAToBNode(Node):
         self.runtime_log_path = None
         self.runtime_log_file = None
         self._open_runtime_log_file()
+
+        self.phase3_pending = False
+        self.phase3_active = False
+        self.phase3_docking_finished = False
+        self.phase3_last_start_attempt = 0.0
+        self.phase3_refine_attempted = False
+        self.phase3_fallback_index = 0
 
         self.timer = self.create_timer(0.1, self.control_loop)
         threading.Thread(target=self.input_thread, daemon=True).start()
@@ -140,6 +149,108 @@ class PointAToBNode(Node):
 
     def map_callback(self, msg: OccupancyGrid):
         self.map_manager.map_callback(msg, self.get_logger())
+
+    def scan_callback(self, msg: LaserScan):
+        self.local_planner.scan_callback(msg)
+
+        # Station detector works in map frame; skip until any pose estimate exists.
+        if self.pose_estimator.pose_source == "none" and not self.pose_estimator.initial_pose_received:
+            return
+
+        self.station_detector.process_scan(
+            msg,
+            self.pose_estimator.current_x,
+            self.pose_estimator.current_y,
+            self.pose_estimator.current_yaw,
+        )
+
+    def _reset_phase3_state(self):
+        self.phase3_pending = False
+        self.phase3_active = False
+        self.phase3_docking_finished = False
+        self.phase3_last_start_attempt = 0.0
+        self.phase3_refine_attempted = False
+        self.phase3_fallback_index = 0
+
+    def _start_phase3_segment(self, now: float, target_internal, label: str) -> bool:
+        current_xy = (self.pose_estimator.current_x, self.pose_estimator.current_y)
+        self.route_manager.set_route(
+            target_internal,
+            [target_internal],
+            now,
+            door_transition_required=False,
+            door_waypoint=None,
+            speed_mode="normal",
+        )
+        self.local_planner.reset_for_new_route()
+
+        ex, ey = self.coords.to_external_xy(target_internal[0], target_internal[1])
+        print(
+            "Phase 3: planning toward {} at external ({:.2f}, {:.2f})".format(
+                label,
+                ex,
+                ey,
+            )
+        )
+
+        ok = self.route_manager.start_next_segment(current_xy, now)
+        self.phase3_last_start_attempt = now
+        if not ok:
+            print("Phase 3: could not start segment, will retry.")
+        return ok
+
+    def _maybe_start_phase3(self, now: float):
+        if not self.config.phase3_enabled:
+            return
+        if self.phase3_docking_finished:
+            return
+        if not (self.phase3_pending or self.phase3_active):
+            return
+        if self.route_manager.is_moving:
+            return
+        if now - self.phase3_last_start_attempt < self.config.phase3_retry_cooldown:
+            return
+
+        current_xy = (self.pose_estimator.current_x, self.pose_estimator.current_y)
+        precise = self.station_detector.get_precise_center_map()
+        coarse = self.station_detector.get_coarse_center_map()
+
+        if precise is not None:
+            d = math.hypot(precise[0] - current_xy[0], precise[1] - current_xy[1])
+            if d <= self.config.phase3_dock_xy_tolerance:
+                print("Phase 3 docking complete: robot is at charging-station center.")
+                self.phase3_pending = False
+                self.phase3_active = False
+                self.phase3_docking_finished = True
+                return
+
+            if self._start_phase3_segment(now, precise, "station center"):
+                self.phase3_pending = False
+                self.phase3_active = True
+            return
+
+        if (coarse is not None) and (not self.phase3_refine_attempted):
+            if self._start_phase3_segment(now, coarse, "station coarse estimate"):
+                self.phase3_pending = False
+                self.phase3_active = True
+                self.phase3_refine_attempted = True
+            return
+
+        if self.phase3_fallback_index < len(self.config.phase3_search_fallback_targets):
+            fallback_name = self.config.phase3_search_fallback_targets[self.phase3_fallback_index]
+            self.phase3_fallback_index += 1
+            if fallback_name in KEY_POINTS:
+                if self._start_phase3_segment(
+                    now,
+                    KEY_POINTS[fallback_name],
+                    "fallback {}".format(fallback_name),
+                ):
+                    self.phase3_pending = False
+                    self.phase3_active = True
+            return
+
+        print("Phase 3: waiting for better station observations before docking.")
+        self.phase3_last_start_attempt = now
 
     def base_map_callback(self, msg: OccupancyGrid):
         self.latest_base_map_msg = msg
@@ -514,7 +625,7 @@ class PointAToBNode(Node):
             return
 
         while rclpy.ok():
-            if self.route_manager.is_moving:
+            if self.route_manager.is_moving or self.phase3_pending or self.phase3_active:
                 time.sleep(0.1)
                 continue
 
@@ -575,6 +686,11 @@ class PointAToBNode(Node):
                     speed_mode=("passadis" if phase2_injected else "normal"),
                 )
                 self.local_planner.reset_for_new_route()
+
+                # New user command supersedes any previous docking mission.
+                self._reset_phase3_state()
+                if phase2_injected and self.config.phase3_enabled:
+                    self.phase3_pending = True
 
                 route_steps = " -> ".join(
                     "({:.2f}, {:.2f})".format(p[0], p[1])
@@ -648,6 +764,8 @@ class PointAToBNode(Node):
                 self.route_manager,
             )
             self.last_marker_publish_time = now
+
+        self._maybe_start_phase3(now)
 
         move = self.local_planner.step(now, self.pose_estimator, self.route_manager)
         move.header.stamp = self.get_clock().now().to_msg()
