@@ -259,92 +259,57 @@ class PointAToBNode(Node):
                 return
         route_external.append(ext_wp)
 
-    def _snap_external_to_nearest_free(self, ext_xy):
-        gxgy = self.map_manager.world_to_grid(*self.coords.to_internal_xy(ext_xy[0], ext_xy[1]))
-        if gxgy is None:
-            return ext_xy
+    def _clamp_passadis_waypoint(self, x, y, door_external):
+        door_x, door_y = door_external
+        wall_margin = max(self.config.passadis_scan_wall_margin, 0.15)
+        length_x = max(self.config.passadis_scan_length_x, 2.0)
+        width_y = max(self.config.passadis_scan_width_y, 1.2)
 
-        gx, gy = gxgy
-        nearest = self.global_planner.find_nearest_free_cell(gx, gy)
-        if nearest is None:
-            return ext_xy
+        x_min = door_x - length_x + wall_margin
+        x_max = door_x - wall_margin
+        y_min = door_y + wall_margin
+        y_max = door_y + width_y - wall_margin
 
-        wx, wy = self.map_manager.grid_to_world(nearest[0], nearest[1])
-        return self.coords.to_external_xy(wx, wy)
+        return (
+            min(max(x, x_min), x_max),
+            min(max(y, y_min), y_max),
+        )
 
-    def _scan_lane_endpoint_x(self, start_x, lane_y, direction):
-        _, _, resolution, _ = self.map_manager.get_active_map_info()
-        step = max(0.10, resolution * 2.0)
-        reach = max(self.config.passadis_scan_length_x * 0.5, 1.0)
-        best_x = start_x
-        traveled = 0.0
-
-        while traveled <= reach:
-            candidate_x = start_x + (direction * traveled)
-            int_xy = self.coords.to_internal_xy(candidate_x, lane_y)
-            grid = self.map_manager.world_to_grid(*int_xy)
-            if grid is None:
-                break
-
-            gx, gy = grid
-            if not self.map_manager.in_bounds(gx, gy):
-                break
-
-            occ = self.map_manager.get_cell_occupancy(gx, gy)
-            if occ > 50:
-                break
-
-            best_x = candidate_x
-            traveled += step
-
-        endpoint_x = best_x - (direction * self.config.passadis_scan_wall_margin)
-        snapped = self._snap_external_to_nearest_free((endpoint_x, lane_y))
-        return snapped[0]
-
-    def generate_passadis_exploration_waypoints(self, anchor_external_xy):
-        # Rectangular zigzag per assignment geometry:
-        # long side on -X (~10m), short side on +Y (~3m).
-        anchor_x, anchor_y = anchor_external_xy
+    def generate_passadis_exploration_waypoints(self, door_external):
+        # Door-anchored rectangular zigzag in user coordinates:
+        # 10m towards negative X and 3m towards positive Y.
+        door_x, door_y = door_external
         length_x = max(self.config.passadis_scan_length_x, 2.0)
         width_y = max(self.config.passadis_scan_width_y, 1.2)
         wall_margin = max(self.config.passadis_scan_wall_margin, 0.15)
 
-        y_low = anchor_y + wall_margin
-        y_high = anchor_y + width_y - wall_margin
-        if y_high <= y_low:
-            y_low = anchor_y + 0.25
-            y_high = anchor_y + max(width_y - 0.25, 0.55)
-
-        # Start near front wall, then move 2.5m away on Y before launching zigzag.
-        y_front_safe = y_high
-        first_y = y_front_safe - self.config.passadis_scan_first_offset_from_front
-        first_y = min(max(first_y, y_low), y_high)
-
-        x_end = anchor_x - length_x
+        x_start = door_x - wall_margin
+        x_end = door_x - length_x + wall_margin
         x_step = max(self.config.passadis_scan_x_step, 0.5)
 
-        x_positions = [anchor_x]
-        x = anchor_x - x_step
+        y_low = door_y + wall_margin
+        y_high = door_y + width_y - wall_margin
+        first_y = min(max(door_y + self.config.passadis_scan_first_offset_from_front, y_low), y_high)
+        other_y = y_low if abs(first_y - y_high) < abs(first_y - y_low) else y_high
+
+        x_positions = [x_start]
+        x = x_start - x_step
         while x > x_end:
             x_positions.append(x)
             x -= x_step
-        x_positions.append(x_end)
+        if not math.isclose(x_positions[-1], x_end, abs_tol=1e-6):
+            x_positions.append(x_end)
 
         waypoints = []
-        # Prime sequence: front-safe point, then lane start point.
-        waypoints.append(self._snap_external_to_nearest_free((anchor_x, y_front_safe)))
-        waypoints.append(self._snap_external_to_nearest_free((anchor_x, first_y)))
+        waypoints.append(self._clamp_passadis_waypoint(x_positions[0], first_y, door_external))
+        waypoints.append(self._clamp_passadis_waypoint(x_positions[0], other_y, door_external))
 
-        # Alternate short-side traversals while progressing left on X.
-        target_y = y_high if abs(y_high - first_y) >= abs(y_low - first_y) else y_low
+        target_y = first_y
         for idx, x_curr in enumerate(x_positions):
-            waypoints.append(self._snap_external_to_nearest_free((x_curr, target_y)))
-            if idx >= len(x_positions) - 1:
-                break
-
-            x_next = x_positions[idx + 1]
-            waypoints.append(self._snap_external_to_nearest_free((x_next, target_y)))
-            target_y = y_low if target_y == y_high else y_high
+            waypoints.append(self._clamp_passadis_waypoint(x_curr, target_y, door_external))
+            if idx < len(x_positions) - 1:
+                waypoints.append(self._clamp_passadis_waypoint(x_positions[idx + 1], target_y, door_external))
+            target_y = other_y if target_y == first_y else first_y
 
         return waypoints
 
@@ -393,17 +358,7 @@ class PointAToBNode(Node):
                 and (not phase2_injected)
                 and (not is_door_obj)
             ):
-                anchor_for_phase2 = current_external_xy
-                if route_external:
-                    for prev_wp in reversed(route_external):
-                        if math.hypot(
-                            prev_wp[0] - door_external[0],
-                            prev_wp[1] - door_external[1],
-                        ) < 0.30:
-                            anchor_for_phase2 = door_external
-                            break
-
-                for explore_wp in self.generate_passadis_exploration_waypoints(anchor_for_phase2):
+                for explore_wp in self.generate_passadis_exploration_waypoints(door_external):
                     self._append_external_waypoint(route_external, explore_wp)
                 phase2_injected = True
 
