@@ -396,8 +396,14 @@ class PointAToBNode(Node):
         door_external = KEY_POINTS["DOOR"]
         current_ext_y = current_external_xy[1]
 
-        # "Already through DOOR" means robot is in upper area.
-        door_passed = current_ext_y > self.config.door_required_y_threshold
+        # "Already through DOOR" should be tied to door geometry, not only a
+        # low fixed threshold, otherwise points like F can be misclassified as
+        # upper-area and skip mandatory DOOR insertion.
+        door_pass_threshold = max(
+            self.config.door_required_y_threshold,
+            door_external[1] - 0.20,
+        )
+        door_passed = current_ext_y > door_pass_threshold
         route_external = []
         phase2_injected = False
 

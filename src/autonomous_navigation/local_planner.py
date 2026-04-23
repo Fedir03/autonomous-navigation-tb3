@@ -316,12 +316,9 @@ class LocalPlanner:
         self.avoid_search_start_time = now
         return move
 
-    def _apply_safety_clamps(self, move: TwistStamped, forward_stop_distance=None):
-        if forward_stop_distance is None:
-            forward_stop_distance = self.config.safe_stop_distance
-
+    def _apply_safety_clamps(self, move: TwistStamped):
         # Conservative stop when frontal clearance is already in warning range.
-        if move.twist.linear.x > 0.0 and self.min_front_dist < forward_stop_distance:
+        if move.twist.linear.x > 0.0 and self.min_front_dist < self.config.safe_stop_distance:
             move.twist.linear.x = 0.0
 
         # Never command forward motion when frontal clearance is critically low.
@@ -439,27 +436,20 @@ class LocalPlanner:
                 return move
 
             # Recovered clearance: continue with normal obstacle handling.
-            if route_manager.door_transition_active:
-                # Door maneuver was interrupted by emergency reverse; restart it
-                # from a known-good alignment state.
-                self._start_door_transition(now, current_x, current_y)
-            else:
-                self.nav_state = "FOLLOW_GOAL"
+            self.nav_state = "FOLLOW_GOAL"
             self._clear_avoid_state()
             self.avoid_retry_not_before = now + self.config.avoid_retry_cooldown
 
-        # If route manager is still in door transition but local FSM drifted out of
-        # door states, restore the door FSM to avoid deadlock with empty path.
-        if (
-            route_manager.door_transition_active
-            and self.nav_state not in ["DOOR_ALIGN_ZERO", "DOOR_SEARCH_LEFT", "DOOR_ALIGN_NINETY", "DOOR_CROSS"]
-        ):
-            self._start_door_transition(now, current_x, current_y)
-
         if self.nav_state in ["DOOR_ALIGN_ZERO", "DOOR_SEARCH_LEFT", "DOOR_ALIGN_NINETY", "DOOR_CROSS"]:
+            if (
+                self.min_front_dist < self.config.safe_stop_distance
+                and self.nav_state != "DOOR_ALIGN_NINETY"
+            ):
+                move.twist.linear.x = 0.0
+                move.twist.angular.z = 0.0
+                return self._apply_safety_clamps(move)
             return self._apply_safety_clamps(
-                self._step_door_transition(move, now, current_x, current_y, current_yaw, route_manager),
-                forward_stop_distance=self.config.collision_stop_distance,
+                self._step_door_transition(move, now, current_x, current_y, current_yaw, route_manager)
             )
 
         # If there is no active path, retry pending segments.
