@@ -259,9 +259,44 @@ class PointAToBNode(Node):
                 return
         route_external.append(ext_wp)
 
+    def generate_passadis_exploration_waypoints(self):
+        min_x = self.config.passadis_explore_min_x
+        max_x = self.config.passadis_explore_max_x
+        min_y = self.config.passadis_explore_min_y
+        max_y = self.config.passadis_explore_max_y
+        lane_spacing = max(self.config.passadis_explore_lane_spacing, 0.4)
+
+        if min_x > max_x:
+            min_x, max_x = max_x, min_x
+        if min_y > max_y:
+            min_y, max_y = max_y, min_y
+
+        lane_ys = []
+        y = min_y
+        while y <= (max_y + 1e-6):
+            lane_ys.append(y)
+            y += lane_spacing
+        if not lane_ys:
+            lane_ys = [min_y]
+        if lane_ys[-1] < (max_y - 0.2):
+            lane_ys.append(max_y)
+
+        waypoints = []
+        left_to_right = True
+        for lane_y in lane_ys:
+            if left_to_right:
+                waypoints.append((min_x, lane_y))
+                waypoints.append((max_x, lane_y))
+            else:
+                waypoints.append((max_x, lane_y))
+                waypoints.append((min_x, lane_y))
+            left_to_right = not left_to_right
+
+        return waypoints
+
     def build_mandatory_route(self, objectives, current_external_xy):
         if not objectives:
-            return [], [], False, None
+            return [], [], False, None, False
 
         door_external = KEY_POINTS["DOOR"]
         current_ext_y = current_external_xy[1]
@@ -269,6 +304,7 @@ class PointAToBNode(Node):
         # "Already through DOOR" means robot is in upper area.
         door_passed = current_ext_y > self.config.door_required_y_threshold
         route_external = []
+        phase2_injected = False
 
         for objective in objectives:
             ext_wp = objective["external"]
@@ -290,6 +326,22 @@ class PointAToBNode(Node):
             if needs_door_first:
                 self._append_external_waypoint(route_external, door_external)
                 door_passed = True
+
+            phase2_target = (
+                obj_name in self.config.phase2_trigger_targets
+                if obj_name is not None
+                else False
+            )
+            if (
+                self.config.phase2_enabled
+                and phase2_target
+                and door_passed
+                and (not phase2_injected)
+                and (not is_door_obj)
+            ):
+                for explore_wp in self.generate_passadis_exploration_waypoints():
+                    self._append_external_waypoint(route_external, explore_wp)
+                phase2_injected = True
 
             self._append_external_waypoint(route_external, ext_wp)
 
@@ -317,7 +369,7 @@ class PointAToBNode(Node):
             else None
         )
 
-        return mandatory_internal, route_external, door_transition_required, door_internal
+        return mandatory_internal, route_external, door_transition_required, door_internal, phase2_injected
 
     def queue_status_print(self):
         with self.status_lock:
@@ -528,6 +580,7 @@ class PointAToBNode(Node):
                     mandatory_external,
                     door_transition_required,
                     door_internal,
+                    phase2_injected,
                 ) = self.build_mandatory_route(
                     objectives,
                     current_external_xy,
@@ -560,6 +613,8 @@ class PointAToBNode(Node):
                         route_steps,
                     )
                 )
+                if phase2_injected:
+                    print("Phase 2 enabled: exploration route injected before final BASE approach.")
 
                 self.telemetry.print_navigation_status(
                     self.pose_estimator,

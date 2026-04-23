@@ -37,7 +37,7 @@ class NavigationConfig:
     nearest_free_search_radius_m: float = 0.45
     treat_unknown_as_free: bool = True
     planner_heuristic_weight: float = 1.00
-    planner_directness_bias: float = 0.7
+    planner_directness_bias: float = 0.8
     planner_unknown_cell_penalty: float = 2.20
     planner_turn_penalty: float = 0.20
     planner_reverse_progress_penalty: float = 0.80
@@ -59,10 +59,10 @@ class NavigationConfig:
     caution_distance: float = 0.28
     follow_block_trigger_distance: float = 0.30
     collision_stop_distance: float = 0.18
-    turn_side_clearance: float = 0.18
+    turn_side_clearance: float = 0.12
 
     lidar_front_cone_deg: float = 90.0
-    lidar_side_cone_deg: float = 70.0
+    lidar_side_cone_deg: float = 40.0
 
     avoid_turn_speed: float = 0.6
     avoid_forward_speed: float = 0.12
@@ -92,6 +92,15 @@ class NavigationConfig:
     # Door-first routing rule for upper room objectives.
     door_required_y_threshold: float = 8.5
     door_forced_targets: Tuple[str, ...] = ("Q", "R", "S", "T", "BASE")
+
+    # Phase 2 mission: after entering Passadis, explore area then return to BASE.
+    phase2_enabled: bool = True
+    phase2_trigger_targets: Tuple[str, ...] = ("BASE",)
+    passadis_explore_min_x: float = 1.2
+    passadis_explore_max_x: float = 9.2
+    passadis_explore_min_y: float = 12.0
+    passadis_explore_max_y: float = 16.4
+    passadis_explore_lane_spacing: float = 1.2
 
     # Door transition behavior (user/external frame references).
     door_align_tolerance: float = 0.10
