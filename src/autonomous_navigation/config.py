@@ -99,7 +99,7 @@ class NavigationConfig:
     phase3_retry_cooldown: float = 1.5
     phase3_use_map_prior: bool = True
     phase3_map_prior_point_name: str = "BASE"
-    phase3_max_target_distance_m: float = 3.0
+    phase3_max_target_distance_m: float = 25.0
     phase_marker_xy_tolerance: float = 0.35
 
     station_max_detection_range: float = 2.2

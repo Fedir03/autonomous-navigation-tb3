@@ -108,7 +108,7 @@ class AutonomousNavigationNode(Node):
         self.phase2_start_time = 0.0
         self.phase2_max_duration_s = 180.0
         self.phase2_repeat_count = 0
-        self.phase2_max_repeats = 3
+        self.phase2_max_repeats = 1
 
         self.phase3_pending = False
         self.phase3_active = False
@@ -137,6 +137,52 @@ class AutonomousNavigationNode(Node):
         if self.runtime_log_file is not None:
             self.runtime_log_file.close()
             self.runtime_log_file = None
+
+    def _has_station_memory(self):
+        if self.station_detector.get_first_detected_precise_center() is not None:
+            return True
+        if self.station_detector.get_first_detected_coarse_center() is not None:
+            return True
+        if self.station_detector.get_precise_center_map() is not None:
+            return True
+        if self.station_detector.get_coarse_center_map() is not None:
+            return True
+        return False
+
+    def _start_phase2_search_loop(self, now: float, reason: str) -> bool:
+        waypoints_external = self.generate_passadis_preset_waypoints()
+        if not waypoints_external:
+            print("Phase 2: no preset waypoints available for repeat loop.")
+            return False
+
+        mandatory_internal = [self.coords.to_internal_xy(p[0], p[1]) for p in waypoints_external]
+        final_external = waypoints_external[-1]
+        final_internal = self.coords.to_internal_xy(final_external[0], final_external[1])
+
+        self.route_manager.set_route(
+            final_internal,
+            mandatory_internal,
+            now,
+            door_transition_required=False,
+            door_waypoint=None,
+            speed_mode="passadis",
+        )
+        self.local_planner.reset_for_new_route()
+
+        ok = self.route_manager.start_next_segment(
+            (self.pose_estimator.current_x, self.pose_estimator.current_y),
+            now,
+        )
+        if ok:
+            self.phase2_active = True
+            self.phase2_entered_passadis = False
+            self.phase2_returned_base = False
+            self.phase3_arm_after_phase2 = True
+            self.phase2_start_time = now
+            print(f"[Phase 2] Started extra passadis loop ({reason}).")
+        else:
+            print("[Phase 2] Could not start extra passadis loop.")
+        return ok
 
     def _update_phase_from_external_y(self, ext_y):
         if self.current_phase == "I" and ext_y >= self.phase_entry_y:
@@ -205,7 +251,7 @@ class AutonomousNavigationNode(Node):
             at_base = math.hypot(ex - base[0], ey - base[1]) <= self.config.phase_marker_xy_tolerance
             
             if at_base or phase2_timeout:
-                station_detected = self.station_detector.get_first_detected_precise_center() is not None
+                station_detected = self._has_station_memory()
                 
                 if phase2_timeout:
                     print(f"[Phase 2] Timeout after {self.phase2_max_duration_s}s.")
@@ -221,8 +267,7 @@ class AutonomousNavigationNode(Node):
                 else:
                     print(f"[Phase 2] No station detected. Repeating exploration (attempt {self.phase2_repeat_count + 1}/{self.phase2_max_repeats}).")
                     self.phase2_repeat_count += 1
-                    self.phase2_entered_passadis = False
-                    self.phase2_start_time = now
+                    self._start_phase2_search_loop(now, "station not detected")
 
         if self.phase3_started or self.phase3_active or self.phase3_pending:
             self.current_phase = "III"
@@ -366,6 +411,19 @@ class AutonomousNavigationNode(Node):
                 self.phase3_pending = False
                 self.phase3_active = True
             return
+
+        first_coarse = self.station_detector.get_first_detected_coarse_center()
+        if (first_coarse is not None) and self._phase3_target_is_valid(current_xy, first_coarse):
+            d_first_coarse = math.hypot(first_coarse[0] - current_xy[0], first_coarse[1] - current_xy[1])
+            if d_first_coarse > self.config.phase3_dock_xy_tolerance:
+                if self._start_phase3_segment(now, first_coarse, "remembered coarse station"):
+                    self.phase3_pending = False
+                    self.phase3_active = True
+                    self.phase3_refine_attempted = True
+            else:
+                print("Phase 3: robot already in remembered coarse station area.")
+                self.phase3_last_start_attempt = now
+            return
         
         precise = self.station_detector.get_precise_center_map()
         if (precise is not None) and self._phase3_target_is_valid(current_xy, precise):
@@ -394,6 +452,14 @@ class AutonomousNavigationNode(Node):
                 print("Phase 3: at coarse station area, waiting for precise center refinement.")
                 self.phase3_last_start_attempt = now
             return
+
+        if self.phase2_repeat_count < self.phase2_max_repeats:
+            self.phase2_repeat_count += 1
+            if self._start_phase2_search_loop(now, "phase3 missing station detection"):
+                self.phase3_pending = False
+                self.phase3_active = False
+                self.phase3_last_start_attempt = now
+                return
 
         print("Phase 3: waiting for station detection before docking.")
         self.phase3_last_start_attempt = now
