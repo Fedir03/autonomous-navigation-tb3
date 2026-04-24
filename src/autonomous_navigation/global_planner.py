@@ -258,8 +258,6 @@ class GlobalPlanner:
                 f"Map x:[{min_x:.2f},{max_x:.2f}] y:[{min_y:.2f},{max_y:.2f}]"
             )
 
-            # If currently planning on base_map, first try SLAM fallback where bounds
-            # may already include the requested target.
             if self.map_manager.active_map_source() == "base" and self.map_manager.map_received:
                 prev_preference = self.map_manager.prefer_base_map_for_planning
                 self.map_manager.prefer_base_map_for_planning = False
@@ -271,8 +269,6 @@ class GlobalPlanner:
                 if fallback_path:
                     return fallback_path
 
-            # Approach behavior: clamp outside start/goal into current map so the
-            # robot can move closer and replan as mapping expands.
             start_grid = self.map_manager.clamp_to_map(start_grid[0], start_grid[1])
             end_grid = self.map_manager.clamp_to_map(end_grid[0], end_grid[1])
             self.last_plan_reaches_goal = not goal_oob

@@ -6,7 +6,6 @@ class MapManager:
         self.coord_adapter = coord_adapter
         self.prefer_base_map_for_planning = prefer_base_map_for_planning
 
-        # Dynamic map (/map)
         self.map_data = None
         self.map_resolution = 0.05
         self.map_origin = [0.0, 0.0]
@@ -14,7 +13,6 @@ class MapManager:
         self.map_height = 0
         self.map_received = False
 
-        # Static/base map (/base_map)
         self.base_map_data = None
         self.base_map_resolution = 0.05
         self.base_map_origin = [0.0, 0.0]

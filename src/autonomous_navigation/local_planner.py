@@ -11,30 +11,19 @@ class LocalPlanner:
         self.logger = logger
         self.coords = coord_adapter
 
-        # LiDAR sectors
         self.min_front_dist = float("inf")
         self.min_left_dist = float("inf")
         self.min_right_dist = float("inf")
 
-        # FSM state
-        # FOLLOW_GOAL | AVOID_OBSTACLE (pivot bypass) | BACKUP |
-        # DOOR_ALIGN_ZERO | DOOR_SEARCH_LEFT | DOOR_ALIGN_NINETY | DOOR_CROSS
         self.nav_state = "FOLLOW_GOAL"
         self.turn_away_sign = 1.0
 
-        # Simple obstacle bypass context.
         self.avoid_stage = None
         self.avoid_side_sign = 1.0
         self.avoid_pivot_xy = None
         self.avoid_search_start_time = 0.0
         self.avoid_search_cycles = 0
         self.avoid_retry_not_before = 0.0
-
-        self.door_target_yaw_zero = 0.0
-        self.door_target_yaw_ninety = 0.0
-        self.door_search_start_time = 0.0
-        self.door_cross_start_xy = None
-        self.door_left_opening_seen = False
 
     def reset_for_new_route(self):
         self.nav_state = "FOLLOW_GOAL"
@@ -45,11 +34,6 @@ class LocalPlanner:
         self.avoid_search_start_time = 0.0
         self.avoid_search_cycles = 0
         self.avoid_retry_not_before = 0.0
-        self.door_target_yaw_zero = 0.0
-        self.door_target_yaw_ninety = 0.0
-        self.door_search_start_time = 0.0
-        self.door_cross_start_xy = None
-        self.door_left_opening_seen = False
 
     def _min_distance_in_sector(self, msg, center_deg, width_deg):
         if not msg.ranges:
@@ -76,7 +60,6 @@ class LocalPlanner:
             if len(msg.ranges) == 0:
                 return
 
-            # Front cone widened to 100 degrees as requested.
             self.min_front_dist = self._min_distance_in_sector(
                 msg,
                 0.0,
@@ -139,8 +122,6 @@ class LocalPlanner:
                     if pivot_goal_dist > (current_goal_dist + self.config.avoid_goal_distance_slack):
                         continue
 
-                    # Prefer direct-clear pivots, but allow riskier pivots that improve
-                    # progress when direct line to goal is still partially obstructed.
                     if self._is_direct_clear(
                         route_manager,
                         pivot,
@@ -149,9 +130,6 @@ class LocalPlanner:
                     ):
                         return pivot, side
 
-                    # Accept near-goal-progress pivots even when pivot->goal line
-                    # is not fully clear yet; local bypass + forced replan handles
-                    # the continuation.
                     return pivot, side
 
         return None, preferred_side
@@ -317,15 +295,12 @@ class LocalPlanner:
         return move
 
     def _apply_safety_clamps(self, move: TwistStamped):
-        # Conservative stop when frontal clearance is already in warning range.
         if move.twist.linear.x > 0.0 and self.min_front_dist < self.config.safe_stop_distance:
             move.twist.linear.x = 0.0
 
-        # Never command forward motion when frontal clearance is critically low.
         if move.twist.linear.x > 0.0 and self.min_front_dist < self.config.collision_stop_distance:
             move.twist.linear.x = 0.0
 
-        # Avoid sweeping into nearby side obstacles while rotating.
         if (
             abs(move.twist.angular.z) > 0.2
             and min(self.min_left_dist, self.min_right_dist) < self.config.turn_side_clearance
@@ -338,83 +313,6 @@ class LocalPlanner:
 
         return move
 
-    def _start_door_transition(self, now, current_x, current_y):
-        self.nav_state = "DOOR_ALIGN_ZERO"
-        self.door_target_yaw_zero = self.coords.external_yaw_to_internal(0.0)
-        self.door_target_yaw_ninety = self.coords.external_yaw_to_internal(
-            math.pi / 2.0
-        )
-        self.door_search_start_time = now
-        self.door_cross_start_xy = (current_x, current_y)
-        self.door_left_opening_seen = False
-
-    def _step_door_transition(
-        self,
-        move,
-        now,
-        current_x,
-        current_y,
-        current_yaw,
-        route_manager,
-    ):
-        if self.nav_state == "DOOR_ALIGN_ZERO":
-            yaw_err = normalize_angle(self.door_target_yaw_zero - current_yaw)
-            move.twist.linear.x = 0.0
-            move.twist.angular.z = max(min(yaw_err * self.config.kp_angular, 0.9), -0.9)
-            if abs(yaw_err) <= self.config.door_align_tolerance:
-                self.nav_state = "DOOR_SEARCH_LEFT"
-                self.door_search_start_time = now
-                self.door_left_opening_seen = False
-            return move
-
-        if self.nav_state == "DOOR_SEARCH_LEFT":
-            yaw_err = normalize_angle(self.door_target_yaw_zero - current_yaw)
-            move.twist.linear.x = self.config.door_forward_speed
-            move.twist.angular.z = max(
-                min(yaw_err * self.config.door_heading_kp, 0.6),
-                -0.6,
-            )
-
-            if (now - self.door_search_start_time) >= self.config.door_search_min_time:
-                if self.min_left_dist > self.config.door_left_opening_distance:
-                    self.door_left_opening_seen = True
-
-            ext_x, _ = self.coords.to_external_xy(current_x, current_y)
-            center_reached = (
-                abs(ext_x - self.config.door_left_center_x)
-                <= self.config.door_left_center_x_tolerance
-            )
-            center_passed = ext_x > (
-                self.config.door_left_center_x + self.config.door_left_center_x_tolerance
-            )
-            if self.door_left_opening_seen and (center_reached or center_passed):
-                self.nav_state = "DOOR_ALIGN_NINETY"
-            return move
-
-        if self.nav_state == "DOOR_ALIGN_NINETY":
-            yaw_err = normalize_angle(self.door_target_yaw_ninety - current_yaw)
-            move.twist.linear.x = 0.0
-            move.twist.angular.z = max(
-                min(yaw_err * self.config.kp_angular, 0.9),
-                -0.9,
-            )
-            if abs(yaw_err) <= self.config.door_align_tolerance:
-                self.nav_state = "DOOR_CROSS"
-                self.door_cross_start_xy = (current_x, current_y)
-            return move
-
-        # DOOR_CROSS
-        yaw_err = normalize_angle(self.door_target_yaw_ninety - current_yaw)
-        move.twist.linear.x = self.config.door_forward_speed
-        move.twist.angular.z = max(min(yaw_err * self.config.door_heading_kp, 0.6), -0.6)
-
-        if self.door_cross_start_xy is not None:
-            d = math.hypot(current_x - self.door_cross_start_xy[0], current_y - self.door_cross_start_xy[1])
-            if d >= self.config.door_second_cross_distance:
-                self.nav_state = "FOLLOW_GOAL"
-                route_manager.complete_door_transition((current_x, current_y), now)
-        return move
-
     def _distance_to(self, x0, y0, x1, y1):
         return math.hypot(x1 - x0, y1 - y0)
 
@@ -425,7 +323,6 @@ class LocalPlanner:
         current_y = pose_estimator.current_y
         current_yaw = pose_estimator.current_yaw
 
-        # Hard-priority emergency reverse when something is too close in front.
         if self.nav_state != "BACKUP" and self.min_front_dist < self.config.backup_min_front_distance:
             self.nav_state = "BACKUP"
 
@@ -435,24 +332,10 @@ class LocalPlanner:
                 move.twist.angular.z = 0.0
                 return move
 
-            # Recovered clearance: continue with normal obstacle handling.
             self.nav_state = "FOLLOW_GOAL"
             self._clear_avoid_state()
             self.avoid_retry_not_before = now + self.config.avoid_retry_cooldown
 
-        if self.nav_state in ["DOOR_ALIGN_ZERO", "DOOR_SEARCH_LEFT", "DOOR_ALIGN_NINETY", "DOOR_CROSS"]:
-            if (
-                self.min_front_dist < self.config.safe_stop_distance
-                and self.nav_state != "DOOR_ALIGN_NINETY"
-            ):
-                move.twist.linear.x = 0.0
-                move.twist.angular.z = 0.0
-                return self._apply_safety_clamps(move)
-            return self._apply_safety_clamps(
-                self._step_door_transition(move, now, current_x, current_y, current_yaw, route_manager)
-            )
-
-        # If there is no active path, retry pending segments.
         if (not route_manager.is_moving) or (not route_manager.path):
             if (
                 route_manager.pending_segment_target is not None
@@ -479,7 +362,6 @@ class LocalPlanner:
             )
             return self._apply_safety_clamps(move)
 
-        # FOLLOW_GOAL + simple obstacle handling
         if self.min_front_dist < self.config.follow_block_trigger_distance:
             if now < self.avoid_retry_not_before:
                 move.twist.linear.x = 0.0
@@ -510,15 +392,8 @@ class LocalPlanner:
                     route_manager,
                 )
                 return self._apply_safety_clamps(move)
-            # Replan succeeded: continue below to follow the new path immediately
-            # (typically starts with an in-place rotation), instead of returning
-            # early with zero commands.
-
         if route_manager.current_wp_index >= len(route_manager.path):
             self.logger.info("Segment reached.")
-            if route_manager.begin_door_transition_if_needed():
-                self._start_door_transition(now, current_x, current_y)
-                return self._apply_safety_clamps(move)
             route_manager.start_next_segment((current_x, current_y), now)
             return self._apply_safety_clamps(move)
 

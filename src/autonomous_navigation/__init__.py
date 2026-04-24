@@ -1,3 +1,3 @@
-from .main_node import PointAToBNode, main
+from .main_node import AutonomousNavigationNode, main
 
-__all__ = ["PointAToBNode", "main"]
+__all__ = ["AutonomousNavigationNode", "main"]

@@ -88,7 +88,6 @@ class ChargingStationDetector:
         if len(pillars) < 2:
             return
 
-        # Coarse estimate from all visible pillar candidates.
         coarse = self._compute_centroid(pillars)
         if self.coarse_center_map is None:
             self.coarse_center_map = coarse

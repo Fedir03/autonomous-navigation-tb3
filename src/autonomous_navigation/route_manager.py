@@ -42,9 +42,6 @@ class RouteManager:
 
         cx, cy = current_xy
 
-        # Path is produced in start->goal order; choose the first waypoint that
-        # is not effectively already reached to avoid snapping to a later nearby
-        # waypoint on self-crossing/curved replans.
         for idx, wp in enumerate(self.path):
             d = math.hypot(wp[0] - cx, wp[1] - cy)
             if d >= (self.config.xy_tolerance * 0.8):
@@ -120,7 +117,6 @@ class RouteManager:
         if not at_door_segment:
             return False
 
-        # Only perform transition when there are pending waypoints beyond DOOR.
         if len(self.global_waypoints) == 0:
             return False
 
@@ -180,8 +176,6 @@ class RouteManager:
             )
             self.last_progress_time = now
 
-            # If this is a partial approach plan and the robot is already at its end,
-            # wait and retry instead of spinning start_next_segment in a tight loop.
             if not reaches_goal and len(self.path) <= 1:
                 end_wp = self.path[-1]
                 if math.hypot(end_wp[0] - current_xy[0], end_wp[1] - current_xy[1]) < self.config.xy_tolerance:

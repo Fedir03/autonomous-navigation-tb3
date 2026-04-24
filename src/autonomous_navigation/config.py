@@ -2,7 +2,6 @@ import math
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
-# Key reference points (external/user convention, do NOT swap)
 KEY_POINTS: Dict[str, Tuple[float, float]] = {
     "A": (4.280, 1.735),
     "B": (5.280, 1.735),
@@ -27,15 +26,10 @@ class NavigationConfig:
     swap_xy: bool = False
     prefer_base_map_for_planning: bool = False
 
-    # Base-map dynamic alignment from initial user pose.
     base_map_dynamic_alignment_enabled: bool = True
-    # Reference pair provided from manual calibration:
-    # when initial pose is (4.880, 2.535), base_map origin in map frame is
-    # (-1.590, -4.627).
     base_map_reference_initial_external_xy: Tuple[float, float] = (4.880, 2.535)
     base_map_reference_origin_map_xy: Tuple[float, float] = (-1.590, -4.627)
 
-    # Global planner obstacle inflation in meters (resolution-independent).
     inflation_radius_m: float = 0.07
     nearest_free_search_radius_m: float = 0.45
     treat_unknown_as_free: bool = True
@@ -87,28 +81,23 @@ class NavigationConfig:
     follow_obstacle_hit_reset_s: float = 1.2
     follow_obstacle_hit_threshold: int = 3
 
-    # Emergency reverse: if an obstacle is closer than this, back up until clear.
     backup_min_front_distance: float = 0.20
     backup_recover_distance: float = 0.34
     backup_speed: float = 0.08
 
-    # Door-first routing rule for upper room objectives.
     door_required_y_threshold: float = 8.5
     door_forced_targets: Tuple[str, ...] = ("Q", "R", "R_BIS", "S", "T", "BASE")
 
-    # Phase 2 mission: after entering Passadis, explore area then return to BASE.
     phase2_enabled: bool = True
     phase2_trigger_targets: Tuple[str, ...] = ("BASE",)
     phase2_preset_route: Tuple[str, ...] = ("R", "U", "T", "S", "Q", "R", "BASE")
     passadis_max_speed: float = 0.38
 
-    # Phase 3 mission: detect charging station and dock to its center.
     phase3_enabled: bool = True
     phase3_search_fallback_targets: Tuple[str, ...] = ("Q", "R")
     phase3_dock_xy_tolerance: float = 0.22
     phase3_retry_cooldown: float = 1.5
 
-    # Charging-station detector (4 pillars around 40cm x 40cm square).
     station_max_detection_range: float = 2.2
     station_cluster_dist: float = 0.05
     station_min_cluster_points: int = 3
@@ -120,7 +109,6 @@ class NavigationConfig:
     station_precise_ema_alpha: float = 0.20
     station_min_precise_observations: int = 3
 
-    # Door transition behavior (user/external frame references).
     door_align_tolerance: float = 0.10
     door_heading_kp: float = 1.4
     door_forward_speed: float = 0.12
@@ -166,7 +154,6 @@ class CoordinateAdapter:
     def __init__(self, swap_xy: bool = False):
         self.swap_xy = swap_xy
 
-        # Transform from external/user frame -> SLAM map frame.
         self.frame_aligned = False
         self.align_cos = 1.0
         self.align_sin = 0.0
@@ -184,7 +171,6 @@ class CoordinateAdapter:
         map_y: float,
         map_yaw: float,
     ):
-        # Rotate/translate external coordinates so the provided initial pose matches current SLAM pose.
         d_yaw = normalize_angle(map_yaw - ext_yaw)
         self.align_cos = math.cos(d_yaw)
         self.align_sin = math.sin(d_yaw)
@@ -237,7 +223,6 @@ class CoordinateAdapter:
         align_yaw = math.atan2(self.align_sin, self.align_cos) if self.frame_aligned else 0.0
         yaw_external = normalize_angle(yaw_internal - align_yaw)
 
-        # Keep yaw coherent with optional axis swap used by the coordinate adapter.
         if self.swap_xy:
             yaw_external = normalize_angle((math.pi / 2.0) - yaw_external)
 

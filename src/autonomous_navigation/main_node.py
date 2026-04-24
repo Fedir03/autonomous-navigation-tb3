@@ -26,9 +26,9 @@ from .station_detector import ChargingStationDetector
 from .telemetry import Telemetry
 
 
-class PointAToBNode(Node):
+class AutonomousNavigationNode(Node):
     def __init__(self):
-        super().__init__("point_a_to_b_node")
+        super().__init__("autonomous_navigation_node")
 
         self.config = NavigationConfig()
         self.coords = CoordinateAdapter(self.config.swap_xy)
@@ -79,7 +79,6 @@ class PointAToBNode(Node):
         self.create_subscription(LaserScan, "/scan", self.scan_callback, qos_best_effort)
         self.create_subscription(OccupancyGrid, "/map", self.map_callback, qos_map)
         self.create_subscription(OccupancyGrid, "/base_map", self.base_map_callback, qos_map)
-        # Fallback QoS to receive map topics when publisher QoS differs.
         self.create_subscription(OccupancyGrid, "/map", self.map_callback, qos_map_fallback)
         self.create_subscription(OccupancyGrid, "/base_map", self.base_map_callback, qos_map_fallback)
 
@@ -153,7 +152,6 @@ class PointAToBNode(Node):
     def scan_callback(self, msg: LaserScan):
         self.local_planner.scan_callback(msg)
 
-        # Station detector works in map frame; skip until any pose estimate exists.
         if self.pose_estimator.pose_source == "none" and not self.pose_estimator.initial_pose_received:
             return
 
@@ -229,8 +227,6 @@ class PointAToBNode(Node):
                 self.phase3_active = True
             return
 
-        # If we have a coarse station estimate, keep refining around it instead of
-        # jumping to distant fallback targets.
         if coarse is not None:
             d_coarse = math.hypot(coarse[0] - current_xy[0], coarse[1] - current_xy[1])
             if d_coarse > self.config.phase3_dock_xy_tolerance:
@@ -285,7 +281,6 @@ class PointAToBNode(Node):
 
         ref_init = self.config.base_map_reference_initial_external_xy
         ref_origin = self.config.base_map_reference_origin_map_xy
-        # Convert the calibrated external anchor of base-map origin to current map frame.
         anchor_external_x = ref_init[0] + ref_origin[0]
         anchor_external_y = ref_init[1] + ref_origin[1]
         ox, oy = self.coords.to_internal_xy(anchor_external_x, anchor_external_y)
@@ -403,13 +398,7 @@ class PointAToBNode(Node):
         door_external = KEY_POINTS["DOOR"]
         current_ext_y = current_external_xy[1]
 
-        # "Already through DOOR" should be tied to door geometry, not only a
-        # low fixed threshold, otherwise points like F can be misclassified as
-        # upper-area and skip mandatory DOOR insertion.
-        door_pass_threshold = max(
-            self.config.door_required_y_threshold,
-            door_external[1] - 0.20,
-        )
+        door_pass_threshold = max(self.config.door_required_y_threshold, door_external[1] - 0.20)
         door_passed = current_ext_y > door_pass_threshold
         route_external = []
         phase2_injected = False
@@ -462,8 +451,6 @@ class PointAToBNode(Node):
             for p in route_external
         ]
 
-        # Door traversal is handled as explicit A* waypoints, so the special
-        # door-transition FSM is not used anymore.
         return mandatory_internal, route_external, False, None, phase2_injected
 
     def queue_status_print(self):
@@ -532,7 +519,6 @@ class PointAToBNode(Node):
             yaw_rad = math.radians(init_yaw_deg)
             self.pending_frame_alignment = (init_x, init_y, yaw_rad)
 
-            # Try alignment now; if TF is not available yet, retry automatically in control loop.
             if not self.try_align_frames():
                 self.get_logger().warn(
                     "TF pose unavailable during initialization. Frame alignment will retry automatically."
@@ -699,7 +685,6 @@ class PointAToBNode(Node):
                 )
                 self.local_planner.reset_for_new_route()
 
-                # New user command supersedes any previous docking mission.
                 self._reset_phase3_state()
                 if phase2_injected and self.config.phase3_enabled:
                     self.phase3_pending = True
@@ -745,7 +730,6 @@ class PointAToBNode(Node):
                 self.route_manager.is_moving = False
 
     def control_loop(self):
-        # Keep trying frame alignment until TF map pose becomes available.
         if not self.frame_alignment_done and self.pending_frame_alignment is not None:
             self.try_align_frames()
 
@@ -786,9 +770,8 @@ class PointAToBNode(Node):
 
 
 def main(args=None):
-    print("Initializing A* + Pivot-Avoid Navigation Node...")
     rclpy.init(args=args)
-    node = PointAToBNode()
+    node = AutonomousNavigationNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

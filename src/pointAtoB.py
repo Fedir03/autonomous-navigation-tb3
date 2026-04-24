@@ -1,7 +1,4 @@
-from autonomous_navigation.main_node import PointAToBNode, main
-
-# Backward-compatible alias for legacy imports.
-PointAtoB = PointAToBNode
+from autonomous_navigation.main_node import AutonomousNavigationNode, main
 
 
 if __name__ == "__main__":

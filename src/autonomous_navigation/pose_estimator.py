@@ -13,20 +13,17 @@ class PoseEstimator:
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, node)
 
-        # Pose state (map frame)
         self.current_x = 0.0
         self.current_y = 0.0
         self.current_yaw = 0.0
         self.pose_source = "none"
         self.initial_pose_received = False
 
-        # Raw odometry
         self.odom_x = 0.0
         self.odom_y = 0.0
         self.odom_yaw = 0.0
         self.odom_received = False
 
-        # Manual odom->map anchor from user-provided initial pose
         self.manual_anchor_ready = False
         self.anchor_rot = 0.0
         self.anchor_tx = 0.0
