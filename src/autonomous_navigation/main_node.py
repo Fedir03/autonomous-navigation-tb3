@@ -125,11 +125,8 @@ class AutonomousNavigationNode(Node):
         logs_dir = os.path.join("/tmp", "ros_autonomous_navigation_logs")
         os.makedirs(logs_dir, exist_ok=True)
         stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
-        self.runtime_log_path = os.path.join(logs_dir, f"navigation_runtime_{stamp}.csv")
+        self.runtime_log_path = os.path.join(logs_dir, f"navigation_runtime_{stamp}.log")
         self.runtime_log_file = open(self.runtime_log_path, "w", encoding="utf-8", buffering=1)
-        self.runtime_log_file.write(
-            "timestamp,current_phase,robot_x,robot_y,robot_yaw,obstacle_points,station_pillars\n"
-        )
         print(f"[LOG] Runtime log: {self.runtime_log_path}")
         self.get_logger().info(f"Runtime log enabled: {self.runtime_log_path}")
 
@@ -279,26 +276,26 @@ class AutonomousNavigationNode(Node):
     def write_runtime_log(self, now):
         if self.runtime_log_file is None:
             return
-        if (now - self.last_runtime_log_time) < 1.0:
+        if (now - self.last_runtime_log_time) < 5.0:
             return
 
         ex, ey = self.coords.to_external_xy(self.pose_estimator.current_x, self.pose_estimator.current_y)
         eyaw = self.coords.internal_yaw_to_external(self.pose_estimator.current_yaw)
         self._update_phase_from_mission_state()
 
-        obstacle_points = self._format_points_compact(
-            self.latest_obstacle_points_map,
-            self.config.log_max_obstacle_points,
-        )
-        station_pillars = self._format_points_compact(
-            self.station_detector.get_recent_pillars_map(),
-            self.config.log_max_station_pillars,
-        )
-
         ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        self.runtime_log_file.write(
-            f"{ts},{self.current_phase},{ex:.3f},{ey:.3f},{eyaw:.4f},\"{obstacle_points}\",\"{station_pillars}\"\n"
-        )
+        line = f"timestamp: {ts} ; Phase {self.current_phase} ; X: {ex:.3f} ; Y: {ey:.3f} ; Rotation: {eyaw:.4f}"
+
+        if self.current_phase == "II":
+            pillars = self.station_detector.get_recent_pillars_map()[: self.config.log_max_station_pillars]
+            if pillars:
+                pparts = []
+                for idx, p in enumerate(pillars, start=1):
+                    px, py = self.coords.to_external_xy(p[0], p[1])
+                    pparts.append(f"Pilar {idx}: ({px:.2f}, {py:.2f})")
+                line += " ; " + " ; ".join(pparts)
+
+        self.runtime_log_file.write(line + "\n")
         self.last_runtime_log_time = now
 
     def map_callback(self, msg: OccupancyGrid):
