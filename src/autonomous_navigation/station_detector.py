@@ -16,6 +16,12 @@ class ChargingStationDetector:
         self.coarse_seen_count = 0
         self.last_coarse_time = 0.0
 
+        self.last_pillars_map = []
+        self.last_pillars_time = 0.0
+
+        self.first_detected_precise_center = None
+        self.first_detection_time = 0.0
+
     def _polar_to_map_points(self, scan, robot_x, robot_y, robot_yaw):
         pts = []
         ang = scan.angle_min
@@ -89,6 +95,9 @@ class ChargingStationDetector:
         if len(pillars) < 2:
             return
 
+        self.last_pillars_map = list(pillars)
+        self.last_pillars_time = time.time()
+
         coarse = self._compute_centroid(pillars)
         now = time.time()
         if self.coarse_center_map is None:
@@ -121,6 +130,12 @@ class ChargingStationDetector:
 
             if self._is_square(combo):
                 center = self._compute_centroid(combo)
+                
+                if self.first_detected_precise_center is None:
+                    self.first_detected_precise_center = center
+                    self.first_detection_time = now
+                    self.logger.info(f"[Station] First precise center detected at ({center[0]:.2f}, {center[1]:.2f})")
+                
                 if self.precise_center_map is None:
                     self.precise_center_map = center
                 else:
@@ -158,3 +173,11 @@ class ChargingStationDetector:
         if self.has_recent_coarse_center():
             return self.coarse_center_map
         return None
+
+    def get_first_detected_precise_center(self):
+        return self.first_detected_precise_center
+
+    def get_recent_pillars_map(self):
+        if (time.time() - self.last_pillars_time) > self.config.station_center_max_age_s:
+            return []
+        return list(self.last_pillars_map)

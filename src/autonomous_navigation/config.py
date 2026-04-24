@@ -100,6 +100,7 @@ class NavigationConfig:
     phase3_use_map_prior: bool = True
     phase3_map_prior_point_name: str = "BASE"
     phase3_max_target_distance_m: float = 3.0
+    phase_marker_xy_tolerance: float = 0.35
 
     station_max_detection_range: float = 2.2
     station_cluster_dist: float = 0.05
@@ -114,6 +115,11 @@ class NavigationConfig:
     station_min_coarse_observations: int = 4
     station_center_max_age_s: float = 6.0
     station_coarse_max_jump_m: float = 0.80
+
+    log_scan_stride: int = 8
+    log_obstacle_max_range: float = 3.0
+    log_max_obstacle_points: int = 20
+    log_max_station_pillars: int = 8
 
     door_align_tolerance: float = 0.10
     door_heading_kp: float = 1.4

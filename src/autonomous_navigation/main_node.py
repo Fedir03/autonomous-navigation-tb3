@@ -99,24 +99,38 @@ class AutonomousNavigationNode(Node):
         self.runtime_log_file = None
         self._open_runtime_log_file()
 
+        self.latest_obstacle_points_map = []
+        self.phase2_active = False
+        self.phase2_entered_passadis = False
+        self.phase2_returned_base = False
+        self.phase3_arm_after_phase2 = False
+        self.phase3_started = False
+        self.phase2_start_time = 0.0
+        self.phase2_max_duration_s = 180.0
+        self.phase2_repeat_count = 0
+        self.phase2_max_repeats = 3
+
         self.phase3_pending = False
         self.phase3_active = False
         self.phase3_docking_finished = False
         self.phase3_last_start_attempt = 0.0
         self.phase3_refine_attempted = False
-        self.phase3_fallback_index = 0
+        self.phase3_started = False
 
         self.timer = self.create_timer(0.1, self.control_loop)
         threading.Thread(target=self.input_thread, daemon=True).start()
         threading.Thread(target=self.spacebar_status_thread, daemon=True).start()
 
     def _open_runtime_log_file(self):
-        logs_dir = os.path.join(os.path.dirname(__file__), "logs")
+        logs_dir = os.path.join("/tmp", "ros_autonomous_navigation_logs")
         os.makedirs(logs_dir, exist_ok=True)
         stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
         self.runtime_log_path = os.path.join(logs_dir, f"navigation_runtime_{stamp}.csv")
         self.runtime_log_file = open(self.runtime_log_path, "w", encoding="utf-8", buffering=1)
-        self.runtime_log_file.write("timestamp,current_phase,robot_x,robot_y,robot_yaw\n")
+        self.runtime_log_file.write(
+            "timestamp,current_phase,robot_x,robot_y,robot_yaw,obstacle_points,station_pillars\n"
+        )
+        print(f"[LOG] Runtime log: {self.runtime_log_path}")
         self.get_logger().info(f"Runtime log enabled: {self.runtime_log_path}")
 
     def close_runtime_log_file(self):
@@ -130,6 +144,93 @@ class AutonomousNavigationNode(Node):
         elif self.current_phase == "II" and ext_y <= self.phase_exit_y:
             self.current_phase = "I"
 
+    def _format_points_compact(self, points_map, max_points):
+        if not points_map:
+            return ""
+
+        payload = []
+        for p in points_map[:max_points]:
+            ex, ey = self.coords.to_external_xy(p[0], p[1])
+            payload.append("{:.2f},{:.2f}".format(ex, ey))
+        return ";".join(payload)
+
+    def _extract_obstacle_points_map(self, scan):
+        if self.pose_estimator.pose_source == "none" and not self.pose_estimator.initial_pose_received:
+            return []
+
+        points = []
+        ang = scan.angle_min
+        stride = max(1, int(self.config.log_scan_stride))
+        max_r = min(scan.range_max, self.config.log_obstacle_max_range)
+        min_passadis_y = KEY_POINTS["DOOR"][1] - 0.10
+
+        for i, r in enumerate(scan.ranges):
+            if (i % stride) != 0:
+                ang += scan.angle_increment
+                continue
+
+            if scan.range_min < r < max_r:
+                lx = r * math.cos(ang)
+                ly = r * math.sin(ang)
+                mx = self.pose_estimator.current_x + (
+                    math.cos(self.pose_estimator.current_yaw) * lx - math.sin(self.pose_estimator.current_yaw) * ly
+                )
+                my = self.pose_estimator.current_y + (
+                    math.sin(self.pose_estimator.current_yaw) * lx + math.cos(self.pose_estimator.current_yaw) * ly
+                )
+                ex, ey = self.coords.to_external_xy(mx, my)
+                if ey >= min_passadis_y:
+                    points.append((mx, my))
+
+            ang += scan.angle_increment
+
+        return points[: self.config.log_max_obstacle_points]
+
+    def _update_phase_from_mission_state(self):
+        ex, ey = self.coords.to_external_xy(
+            self.pose_estimator.current_x,
+            self.pose_estimator.current_y,
+        )
+
+        if self.phase2_active and (not self.phase2_entered_passadis):
+            r_bis = KEY_POINTS.get("R_BIS")
+            if r_bis is not None:
+                if math.hypot(ex - r_bis[0], ey - r_bis[1]) <= self.config.phase_marker_xy_tolerance:
+                    self.phase2_entered_passadis = True
+
+        if self.phase2_active and self.phase2_entered_passadis and (not self.phase2_returned_base):
+            base = KEY_POINTS["BASE"]
+            now = time.time()
+            phase2_timeout = (now - self.phase2_start_time) > self.phase2_max_duration_s
+            at_base = math.hypot(ex - base[0], ey - base[1]) <= self.config.phase_marker_xy_tolerance
+            
+            if at_base or phase2_timeout:
+                station_detected = self.station_detector.get_first_detected_precise_center() is not None
+                
+                if phase2_timeout:
+                    print(f"[Phase 2] Timeout after {self.phase2_max_duration_s}s.")
+                
+                if station_detected or self.phase2_repeat_count >= self.phase2_max_repeats:
+                    if not station_detected:
+                        print(f"[Phase 2] Max repeats ({self.phase2_max_repeats}) reached. Proceeding without station detection.")
+                    self.phase2_returned_base = True
+                    self.phase2_active = False
+                    if self.phase3_arm_after_phase2:
+                        self.phase3_pending = True
+                        self.phase3_arm_after_phase2 = False
+                else:
+                    print(f"[Phase 2] No station detected. Repeating exploration (attempt {self.phase2_repeat_count + 1}/{self.phase2_max_repeats}).")
+                    self.phase2_repeat_count += 1
+                    self.phase2_entered_passadis = False
+                    self.phase2_start_time = now
+
+        if self.phase3_started or self.phase3_active or self.phase3_pending:
+            self.current_phase = "III"
+        elif self.phase2_active and self.phase2_entered_passadis and (not self.phase2_returned_base):
+            self.current_phase = "II"
+        else:
+            self.current_phase = "I"
+
     def write_runtime_log(self, now):
         if self.runtime_log_file is None:
             return
@@ -138,11 +239,20 @@ class AutonomousNavigationNode(Node):
 
         ex, ey = self.coords.to_external_xy(self.pose_estimator.current_x, self.pose_estimator.current_y)
         eyaw = self.coords.internal_yaw_to_external(self.pose_estimator.current_yaw)
-        self._update_phase_from_external_y(ey)
+        self._update_phase_from_mission_state()
+
+        obstacle_points = self._format_points_compact(
+            self.latest_obstacle_points_map,
+            self.config.log_max_obstacle_points,
+        )
+        station_pillars = self._format_points_compact(
+            self.station_detector.get_recent_pillars_map(),
+            self.config.log_max_station_pillars,
+        )
 
         ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         self.runtime_log_file.write(
-            f"{ts},{self.current_phase},{ex:.3f},{ey:.3f},{eyaw:.4f}\n"
+            f"{ts},{self.current_phase},{ex:.3f},{ey:.3f},{eyaw:.4f},\"{obstacle_points}\",\"{station_pillars}\"\n"
         )
         self.last_runtime_log_time = now
 
@@ -161,6 +271,7 @@ class AutonomousNavigationNode(Node):
             self.pose_estimator.current_y,
             self.pose_estimator.current_yaw,
         )
+        self.latest_obstacle_points_map = self._extract_obstacle_points_map(msg)
 
     def _reset_phase3_state(self):
         self.phase3_pending = False
@@ -168,7 +279,7 @@ class AutonomousNavigationNode(Node):
         self.phase3_docking_finished = False
         self.phase3_last_start_attempt = 0.0
         self.phase3_refine_attempted = False
-        self.phase3_fallback_index = 0
+        self.phase3_started = False
 
     def _start_phase3_segment(self, now: float, target_internal, label: str) -> bool:
         current_xy = (self.pose_estimator.current_x, self.pose_estimator.current_y)
@@ -195,6 +306,8 @@ class AutonomousNavigationNode(Node):
         self.phase3_last_start_attempt = now
         if not ok:
             print("Phase 3: could not start segment, will retry.")
+        else:
+            self.phase3_started = True
         return ok
 
     def _phase3_target_is_valid(self, current_xy, target_xy):
@@ -238,9 +351,23 @@ class AutonomousNavigationNode(Node):
             return
 
         current_xy = (self.pose_estimator.current_x, self.pose_estimator.current_y)
-        precise = self.station_detector.get_precise_center_map()
-        coarse = self.station_detector.get_coarse_center_map()
+        
+        first_detected = self.station_detector.get_first_detected_precise_center()
+        if (first_detected is not None) and self._phase3_target_is_valid(current_xy, first_detected):
+            d = math.hypot(first_detected[0] - current_xy[0], first_detected[1] - current_xy[1])
+            if d <= self.config.phase3_dock_xy_tolerance:
+                print("Phase 3 docking complete: robot is at charging-station center.")
+                self.phase3_pending = False
+                self.phase3_active = False
+                self.phase3_docking_finished = True
+                return
 
+            if self._start_phase3_segment(now, first_detected, "detected station center"):
+                self.phase3_pending = False
+                self.phase3_active = True
+            return
+        
+        precise = self.station_detector.get_precise_center_map()
         if (precise is not None) and self._phase3_target_is_valid(current_xy, precise):
             d = math.hypot(precise[0] - current_xy[0], precise[1] - current_xy[1])
             if d <= self.config.phase3_dock_xy_tolerance:
@@ -250,11 +377,12 @@ class AutonomousNavigationNode(Node):
                 self.phase3_docking_finished = True
                 return
 
-            if self._start_phase3_segment(now, precise, "station center"):
+            if self._start_phase3_segment(now, precise, "current station center"):
                 self.phase3_pending = False
                 self.phase3_active = True
             return
 
+        coarse = self.station_detector.get_coarse_center_map()
         if (coarse is not None) and self._phase3_target_is_valid(current_xy, coarse):
             d_coarse = math.hypot(coarse[0] - current_xy[0], coarse[1] - current_xy[1])
             if d_coarse > self.config.phase3_dock_xy_tolerance:
@@ -267,32 +395,7 @@ class AutonomousNavigationNode(Node):
                 self.phase3_last_start_attempt = now
             return
 
-        map_prior = self._phase3_get_map_prior_center()
-        if (map_prior is not None) and self._phase3_target_is_valid(current_xy, map_prior):
-            if self._start_phase3_segment(now, map_prior, "station map prior"):
-                self.phase3_pending = False
-                self.phase3_active = True
-            return
-
-        if self.phase3_fallback_index < len(self.config.phase3_search_fallback_targets):
-            fallback_name = self.config.phase3_search_fallback_targets[self.phase3_fallback_index]
-            self.phase3_fallback_index += 1
-            if fallback_name in KEY_POINTS:
-                fallback_external = KEY_POINTS[fallback_name]
-                fallback_internal = self.coords.to_internal_xy(
-                    fallback_external[0],
-                    fallback_external[1],
-                )
-                if self._phase3_target_is_valid(current_xy, fallback_internal) and self._start_phase3_segment(
-                    now,
-                    fallback_internal,
-                    "fallback {}".format(fallback_name),
-                ):
-                    self.phase3_pending = False
-                    self.phase3_active = True
-            return
-
-        print("Phase 3: waiting for better station observations before docking.")
+        print("Phase 3: waiting for station detection before docking.")
         self.phase3_last_start_attempt = now
 
     def base_map_callback(self, msg: OccupancyGrid):
@@ -722,7 +825,18 @@ class AutonomousNavigationNode(Node):
 
                 self._reset_phase3_state()
                 if phase2_injected and self.config.phase3_enabled:
-                    self.phase3_pending = True
+                    self.phase2_active = True
+                    self.phase2_entered_passadis = False
+                    self.phase2_returned_base = False
+                    self.phase3_arm_after_phase2 = True
+                    self.phase2_start_time = now
+                    self.phase2_repeat_count = 0
+                else:
+                    self.phase2_active = False
+                    self.phase2_entered_passadis = False
+                    self.phase2_returned_base = False
+                    self.phase3_arm_after_phase2 = False
+                    self.phase2_repeat_count = 0
 
                 route_steps = " -> ".join(
                     "({:.2f}, {:.2f})".format(p[0], p[1])
