@@ -197,6 +197,34 @@ class AutonomousNavigationNode(Node):
             print("Phase 3: could not start segment, will retry.")
         return ok
 
+    def _phase3_target_is_valid(self, current_xy, target_xy):
+        if target_xy is None:
+            return False
+
+        d = math.hypot(target_xy[0] - current_xy[0], target_xy[1] - current_xy[1])
+        if d > self.config.phase3_max_target_distance_m:
+            return False
+
+        g = self.map_manager.world_to_grid(target_xy[0], target_xy[1])
+        if g is None:
+            return False
+
+        if not self.map_manager.in_bounds(g[0], g[1]):
+            return False
+
+        return True
+
+    def _phase3_get_map_prior_center(self):
+        if not self.config.phase3_use_map_prior:
+            return None
+
+        name = self.config.phase3_map_prior_point_name
+        if name not in KEY_POINTS:
+            return None
+
+        p = KEY_POINTS[name]
+        return self.coords.to_internal_xy(p[0], p[1])
+
     def _maybe_start_phase3(self, now: float):
         if not self.config.phase3_enabled:
             return
@@ -213,7 +241,7 @@ class AutonomousNavigationNode(Node):
         precise = self.station_detector.get_precise_center_map()
         coarse = self.station_detector.get_coarse_center_map()
 
-        if precise is not None:
+        if (precise is not None) and self._phase3_target_is_valid(current_xy, precise):
             d = math.hypot(precise[0] - current_xy[0], precise[1] - current_xy[1])
             if d <= self.config.phase3_dock_xy_tolerance:
                 print("Phase 3 docking complete: robot is at charging-station center.")
@@ -227,7 +255,7 @@ class AutonomousNavigationNode(Node):
                 self.phase3_active = True
             return
 
-        if coarse is not None:
+        if (coarse is not None) and self._phase3_target_is_valid(current_xy, coarse):
             d_coarse = math.hypot(coarse[0] - current_xy[0], coarse[1] - current_xy[1])
             if d_coarse > self.config.phase3_dock_xy_tolerance:
                 if self._start_phase3_segment(now, coarse, "station coarse estimate"):
@@ -239,6 +267,13 @@ class AutonomousNavigationNode(Node):
                 self.phase3_last_start_attempt = now
             return
 
+        map_prior = self._phase3_get_map_prior_center()
+        if (map_prior is not None) and self._phase3_target_is_valid(current_xy, map_prior):
+            if self._start_phase3_segment(now, map_prior, "station map prior"):
+                self.phase3_pending = False
+                self.phase3_active = True
+            return
+
         if self.phase3_fallback_index < len(self.config.phase3_search_fallback_targets):
             fallback_name = self.config.phase3_search_fallback_targets[self.phase3_fallback_index]
             self.phase3_fallback_index += 1
@@ -248,7 +283,7 @@ class AutonomousNavigationNode(Node):
                     fallback_external[0],
                     fallback_external[1],
                 )
-                if self._start_phase3_segment(
+                if self._phase3_target_is_valid(current_xy, fallback_internal) and self._start_phase3_segment(
                     now,
                     fallback_internal,
                     "fallback {}".format(fallback_name),

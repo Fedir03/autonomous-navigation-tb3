@@ -97,6 +97,9 @@ class NavigationConfig:
     phase3_search_fallback_targets: Tuple[str, ...] = ("Q", "R")
     phase3_dock_xy_tolerance: float = 0.22
     phase3_retry_cooldown: float = 1.5
+    phase3_use_map_prior: bool = True
+    phase3_map_prior_point_name: str = "BASE"
+    phase3_max_target_distance_m: float = 3.0
 
     station_max_detection_range: float = 2.2
     station_cluster_dist: float = 0.05
@@ -108,6 +111,9 @@ class NavigationConfig:
     station_coarse_ema_alpha: float = 0.25
     station_precise_ema_alpha: float = 0.20
     station_min_precise_observations: int = 3
+    station_min_coarse_observations: int = 4
+    station_center_max_age_s: float = 6.0
+    station_coarse_max_jump_m: float = 0.80
 
     door_align_tolerance: float = 0.10
     door_heading_kp: float = 1.4

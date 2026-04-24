@@ -13,6 +13,7 @@ class ChargingStationDetector:
         self.last_precise_time = 0.0
 
         self.coarse_center_map = None
+        self.coarse_seen_count = 0
         self.last_coarse_time = 0.0
 
     def _polar_to_map_points(self, scan, robot_x, robot_y, robot_yaw):
@@ -89,15 +90,24 @@ class ChargingStationDetector:
             return
 
         coarse = self._compute_centroid(pillars)
+        now = time.time()
         if self.coarse_center_map is None:
             self.coarse_center_map = coarse
+            self.coarse_seen_count = 1
+            self.last_coarse_time = now
         else:
-            alpha = self.config.station_coarse_ema_alpha
-            self.coarse_center_map = (
-                (1.0 - alpha) * self.coarse_center_map[0] + alpha * coarse[0],
-                (1.0 - alpha) * self.coarse_center_map[1] + alpha * coarse[1],
+            jump = math.hypot(
+                coarse[0] - self.coarse_center_map[0],
+                coarse[1] - self.coarse_center_map[1],
             )
-        self.last_coarse_time = time.time()
+            if jump <= self.config.station_coarse_max_jump_m:
+                alpha = self.config.station_coarse_ema_alpha
+                self.coarse_center_map = (
+                    (1.0 - alpha) * self.coarse_center_map[0] + alpha * coarse[0],
+                    (1.0 - alpha) * self.coarse_center_map[1] + alpha * coarse[1],
+                )
+                self.coarse_seen_count += 1
+                self.last_coarse_time = now
 
         if len(pillars) < 4:
             return
@@ -121,16 +131,30 @@ class ChargingStationDetector:
                     )
 
                 self.precise_seen_count += 1
-                self.last_precise_time = time.time()
+                self.last_precise_time = now
                 return
 
     def has_precise_center(self):
         return self.precise_seen_count >= self.config.station_min_precise_observations
 
+    def has_recent_precise_center(self):
+        if not self.has_precise_center():
+            return False
+        return (time.time() - self.last_precise_time) <= self.config.station_center_max_age_s
+
+    def has_recent_coarse_center(self):
+        if self.coarse_center_map is None:
+            return False
+        if self.coarse_seen_count < self.config.station_min_coarse_observations:
+            return False
+        return (time.time() - self.last_coarse_time) <= self.config.station_center_max_age_s
+
     def get_precise_center_map(self):
-        if self.has_precise_center():
+        if self.has_recent_precise_center():
             return self.precise_center_map
         return None
 
     def get_coarse_center_map(self):
-        return self.coarse_center_map
+        if self.has_recent_coarse_center():
+            return self.coarse_center_map
+        return None
