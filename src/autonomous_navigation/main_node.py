@@ -128,15 +128,22 @@ class AutonomousNavigationNode(Node):
             self.runtime_log_file.close()
             self.runtime_log_file = None
 
+    def _station_candidate_in_allowed_zone(self, target_xy_internal):
+        if target_xy_internal is None:
+            return False
+        ex, ey = self.coords.to_external_xy(target_xy_internal[0], target_xy_internal[1])
+        return (ex > 9.0) and (ey > 14.0)
+
     def _has_station_memory(self):
-        if self.station_detector.get_first_detected_precise_center() is not None:
-            return True
-        if self.station_detector.get_first_detected_coarse_center() is not None:
-            return True
-        if self.station_detector.get_precise_center_map() is not None:
-            return True
-        if self.station_detector.get_coarse_center_map() is not None:
-            return True
+        candidates = [
+            self.station_detector.get_first_detected_precise_center(),
+            self.station_detector.get_first_detected_coarse_center(),
+            self.station_detector.get_precise_center_map(),
+            self.station_detector.get_coarse_center_map(),
+        ]
+        for c in candidates:
+            if self._station_candidate_in_allowed_zone(c):
+                return True
         return False
 
     def _start_phase2_search_loop(self, now: float, reason: str) -> bool:
@@ -347,6 +354,9 @@ class AutonomousNavigationNode(Node):
 
     def _phase3_target_is_valid(self, current_xy, target_xy):
         if target_xy is None:
+            return False
+
+        if not self._station_candidate_in_allowed_zone(target_xy):
             return False
 
         d = math.hypot(target_xy[0] - current_xy[0], target_xy[1] - current_xy[1])
