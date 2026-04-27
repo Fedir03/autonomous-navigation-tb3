@@ -24,11 +24,6 @@ KEY_POINTS: Dict[str, Tuple[float, float]] = {
 @dataclass
 class NavigationConfig:
     swap_xy: bool = False
-    prefer_base_map_for_planning: bool = False
-
-    base_map_dynamic_alignment_enabled: bool = True
-    base_map_reference_initial_external_xy: Tuple[float, float] = (4.880, 2.535)
-    base_map_reference_origin_map_xy: Tuple[float, float] = (-1.590, -4.627)
 
     inflation_radius_m: float = 0.07
     nearest_free_search_radius_m: float = 0.45

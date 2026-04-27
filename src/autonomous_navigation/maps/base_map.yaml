@@ -1,8 +1,0 @@
-image: base_map.pgm
-mode: trinary
-# Base map is consumed directly in the map frame.
-resolution: 0.01
-origin: [-1.59, -1.967, 0.0]
-negate: 0
-occupied_thresh: 0.65
-free_thresh: 0.196

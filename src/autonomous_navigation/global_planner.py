@@ -213,37 +213,19 @@ class GlobalPlanner:
                 return best
         return None
 
-    def _try_slam_fallback(self, start_xy, end_xy, reason):
-        if self.map_manager.active_map_source() != "base" or (not self.map_manager.map_received):
-            self.last_error = reason
-            return []
-
-        prev_preference = self.map_manager.prefer_base_map_for_planning
-        self.map_manager.prefer_base_map_for_planning = False
-        try:
-            fallback_path = self.calculate_path(start_xy, end_xy)
-        finally:
-            self.map_manager.prefer_base_map_for_planning = prev_preference
-
-        if fallback_path:
-            self.last_error = ""
-            return fallback_path
-
-        self.last_error = reason + " (SLAM fallback also failed)"
-        return []
-
     def calculate_path(self, start_xy, end_xy):
         self.last_plan_reaches_goal = True
 
         width, height, resolution, origin = self.map_manager.get_active_map_info()
         if width <= 0 or height <= 0:
-            self.last_error = "No map/base_map received yet."
+            self.last_error = "No SLAM map received yet."
             return []
 
         start_grid = self.map_manager.world_to_grid(*start_xy)
         end_grid = self.map_manager.world_to_grid(*end_xy)
         if start_grid is None or end_grid is None:
-            return self._try_slam_fallback(start_xy, end_xy, "Invalid map or coordinates.")
+            self.last_error = "Invalid map or coordinates."
+            return []
 
         start_oob = not self.map_manager.in_bounds(start_grid[0], start_grid[1])
         goal_oob = not self.map_manager.in_bounds(end_grid[0], end_grid[1])
@@ -258,17 +240,6 @@ class GlobalPlanner:
                 f"Map x:[{min_x:.2f},{max_x:.2f}] y:[{min_y:.2f},{max_y:.2f}]"
             )
 
-            if self.map_manager.active_map_source() == "base" and self.map_manager.map_received:
-                prev_preference = self.map_manager.prefer_base_map_for_planning
-                self.map_manager.prefer_base_map_for_planning = False
-                try:
-                    fallback_path = self.calculate_path(start_xy, end_xy)
-                finally:
-                    self.map_manager.prefer_base_map_for_planning = prev_preference
-
-                if fallback_path:
-                    return fallback_path
-
             start_grid = self.map_manager.clamp_to_map(start_grid[0], start_grid[1])
             end_grid = self.map_manager.clamp_to_map(end_grid[0], end_grid[1])
             self.last_plan_reaches_goal = not goal_oob
@@ -279,11 +250,8 @@ class GlobalPlanner:
         start_grid = self.find_nearest_free_cell(*start_grid)
         end_grid = self.find_nearest_free_cell(*end_grid)
         if start_grid is None or end_grid is None:
-            return self._try_slam_fallback(
-                start_xy,
-                end_xy,
-                "Could not find nearby free start/end cell.",
-            )
+            self.last_error = "Could not find nearby free start/end cell."
+            return []
 
         if self.straight_path_shortcut and self._segment_is_free(start_grid, end_grid):
             path_grid = list(self._bresenham_cells(start_grid, end_grid))[1:]
@@ -335,11 +303,8 @@ class GlobalPlanner:
                             came_from[neighbor] = current
 
             if not found:
-                return self._try_slam_fallback(
-                    start_xy,
-                    end_xy,
-                    "A* failed to find a path with current map(s).",
-                )
+                self.last_error = "A* failed to find a path with current map."
+                return []
 
             path_grid = []
             curr = end_grid
