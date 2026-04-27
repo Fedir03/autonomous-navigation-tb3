@@ -97,18 +97,18 @@ class NavigationConfig:
     phase3_max_target_distance_m: float = 25.0
     phase_marker_xy_tolerance: float = 0.35
 
-    station_max_detection_range: float = 2.2
-    station_cluster_dist: float = 0.05
-    station_min_cluster_points: int = 3
+    station_max_detection_range: float = 3.0
+    station_cluster_dist: float = 0.08
+    station_min_cluster_points: int = 2
     station_max_pillars: int = 20
     station_side_len: float = 0.40
-    station_geom_tol: float = 0.12
+    station_geom_tol: float = 0.20
     station_max_square_combinations: int = 500
     station_coarse_ema_alpha: float = 0.25
     station_precise_ema_alpha: float = 0.20
-    station_min_precise_observations: int = 3
-    station_min_coarse_observations: int = 4
-    station_center_max_age_s: float = 6.0
+    station_min_precise_observations: int = 1
+    station_min_coarse_observations: int = 2
+    station_center_max_age_s: float = 20.0
     station_coarse_max_jump_m: float = 0.80
 
     log_scan_stride: int = 8

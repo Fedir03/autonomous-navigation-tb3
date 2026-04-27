@@ -109,6 +109,7 @@ class AutonomousNavigationNode(Node):
         self.phase3_last_start_attempt = 0.0
         self.phase3_refine_attempted = False
         self.phase3_started = False
+        self.station_guess_map = None
 
         self.timer = self.create_timer(0.1, self.control_loop)
         threading.Thread(target=self.input_thread, daemon=True).start()
@@ -134,7 +135,38 @@ class AutonomousNavigationNode(Node):
         ex, ey = self.coords.to_external_xy(target_xy_internal[0], target_xy_internal[1])
         return (ex > 9.0) and (ey > 14.0)
 
+    def _update_station_guess_from_detector(self):
+        candidates = [
+            self.station_detector.get_first_detected_precise_center(),
+            self.station_detector.get_first_detected_coarse_center(),
+            self.station_detector.get_precise_center_map(),
+            self.station_detector.get_coarse_center_map(),
+        ]
+
+        recent_pillars = self.station_detector.get_recent_pillars_map()
+        if len(recent_pillars) >= 2:
+            sx = sum(p[0] for p in recent_pillars)
+            sy = sum(p[1] for p in recent_pillars)
+            candidates.append((sx / len(recent_pillars), sy / len(recent_pillars)))
+
+        for c in candidates:
+            if self._station_candidate_in_allowed_zone(c):
+                if self.station_guess_map is None:
+                    self.station_guess_map = c
+                    ex, ey = self.coords.to_external_xy(c[0], c[1])
+                    print(f"[Station] Persisted station guess at external ({ex:.2f}, {ey:.2f})")
+                else:
+                    alpha = 0.20
+                    self.station_guess_map = (
+                        (1.0 - alpha) * self.station_guess_map[0] + alpha * c[0],
+                        (1.0 - alpha) * self.station_guess_map[1] + alpha * c[1],
+                    )
+                return
+
     def _has_station_memory(self):
+        if self.station_guess_map is not None and self._station_candidate_in_allowed_zone(self.station_guess_map):
+            return True
+
         candidates = [
             self.station_detector.get_first_detected_precise_center(),
             self.station_detector.get_first_detected_coarse_center(),
@@ -313,6 +345,7 @@ class AutonomousNavigationNode(Node):
             self.pose_estimator.current_y,
             self.pose_estimator.current_yaw,
         )
+        self._update_station_guess_from_detector()
         self.latest_obstacle_points_map = self._extract_obstacle_points_map(msg)
 
     def _reset_phase3_state(self):
@@ -396,6 +429,23 @@ class AutonomousNavigationNode(Node):
             return
 
         current_xy = (self.pose_estimator.current_x, self.pose_estimator.current_y)
+
+        if (self.station_guess_map is not None) and self._phase3_target_is_valid(current_xy, self.station_guess_map):
+            d_guess = math.hypot(
+                self.station_guess_map[0] - current_xy[0],
+                self.station_guess_map[1] - current_xy[1],
+            )
+            if d_guess <= self.config.phase3_dock_xy_tolerance:
+                print("Phase 3 docking complete: robot is at persisted station guess.")
+                self.phase3_pending = False
+                self.phase3_active = False
+                self.phase3_docking_finished = True
+                return
+
+            if self._start_phase3_segment(now, self.station_guess_map, "persisted station guess"):
+                self.phase3_pending = False
+                self.phase3_active = True
+            return
         
         first_detected = self.station_detector.get_first_detected_precise_center()
         if (first_detected is not None) and self._phase3_target_is_valid(current_xy, first_detected):
@@ -851,6 +901,7 @@ class AutonomousNavigationNode(Node):
                     speed_mode=("passadis" if phase2_injected else "normal"),
                 )
                 self.local_planner.reset_for_new_route()
+                self.station_guess_map = None
 
                 self._reset_phase3_state()
                 if phase2_injected and self.config.phase3_enabled:
